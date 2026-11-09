@@ -1,0 +1,28 @@
+name: PlatformIO build
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+
+      - name: Install PlatformIO Core
+        run: pip install platformio==6.2.0
+
+      - name: Secrets placeholder for the build (never real wifi credentials)
+        run: cp include/secrets.example.h include/secrets.h
+
+      - name: Run PlatformIO build
+        run: pio run
+
+      - name: Run native unittest (retention policy)
+        run: pio test -e native
