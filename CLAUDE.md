@@ -26,7 +26,7 @@ home-monitor project.
 - Every firmware build includes OTA. USB is the fallback.
 - Watchdog on (also during OTA), log the reset reason.
 - Time via NTP, internally UTC. No measurements without synced time.
-- Save first (SD), then upload; only mark as uploaded after confirmation. (Not built yet: storage lands in F2.)
+- Save first (SD), then upload; only mark as uploaded after confirmation. (SD storage lands in F1/F2; upload to the cloud lands in F5.)
 - Log storage/wifi errors, never break the measurement or the web page. No abort().
 - Fixed buffers, snprintf, no String concatenation in loops; release photo buffers immediately.
 - DHT22 on 3V3, never 5V. Avoid strapping pins and GPIO4 (flash LED).
@@ -44,25 +44,28 @@ home-monitor project.
 ## Structure and commands
 
 ### Stack
-- PlatformIO Core (CLI), environments `esp32cam` (USB), `esp32cam_ota` (OTA, extends `esp32cam`), `native` (retention test only).
+- PlatformIO Core (CLI), environments `esp32cam` (USB), `esp32cam_ota` (OTA, extends `esp32cam`), `native` (pure-logic tests only: retention policy, SD card paths).
 - Framework: Arduino. Platform: `espressif32@6.9.0` (pinned in platformio.ini).
 - Libraries: `adafruit/DHT sensor library@1.4.7`, `adafruit/Adafruit Unified Sensor@1.1.15`. No other libraries.
 - mDNS / OTA hostname: `fermentatiebox`.
 
 ### Modules (src/)
-- `sensor.h/.cpp` — DHT22 reading. Pin GPIO13 for now (see NOTES.md; revisited in F1 once the SD card is in play).
+- `sensor.h/.cpp` — DHT22 reading. Pin GPIO13, confirmed free in 1-bit SD mode (see NOTES.md).
 - `wifi_time.h/.cpp` — wifi connection (with reconnect) and NTP time, internally UTC.
 - `diag.h/.cpp` — reset reason.
 - `ota.h/.cpp` — ArduinoOTA (wireless firmware update), hostname `fermentatiebox`, password from `include/secrets.h` (`OTA_PASSWORD`).
-- `retention.h/.cpp` — pure function deciding which day files to delete under low free space. Not wired into the firmware yet (storage lands in F2); covered by a native test so that env stays meaningful from F0 onward.
+- `camera.h/.cpp` — OV2640 photo capture (SVGA), pins from Espressif's `camera_pins.h` (`CAMERA_MODEL_AI_THINKER`), PSRAM-dependent buffer count. Taken from the home-monitor project.
+- `paths.h/.cpp` — pure functions turning a UTC time into the fixed SD card paths (`/data/YYYY-MM-DD.csv`, `/photos/YYYY-MM-DD/HHMMSS.jpg`). Native tested.
+- `sd_storage.h/.cpp` — SD card start in 1-bit mode, CSV append and photo save using `paths.h`.
+- `retention.h/.cpp` — pure function deciding which day files to delete under low free space. Not wired into the firmware yet (SD retention policy follows in F2); covered by a native test so that env stays meaningful from F0 onward.
 - `version.h` — `FIRMWARE_VERSION`, bumped on every firmware PR.
-- `main.cpp` — stays short: setup/loop calling the modules. F0 scope: measure every minute, connect wifi, sync NTP, OTA, watchdog. No camera, no SD card, no web page (F1–F3).
+- `main.cpp` — stays short: setup/loop calling the modules. F1 scope: SD card (1-bit) + camera + DHT22 together, one combined measurement+photo interval, connect wifi, sync NTP, OTA, watchdog. No retention policy wired in yet, no web page (F2/F3).
 
 ### Commands
 - Build (`esp32cam`, the default): `pio run`
 - Upload via USB: `pio run -t upload` (manual procedure, see NOTES.md — I run this myself)
 - Upload via wifi (OTA): `OTA_PASSWORD=... pio run -e esp32cam_ota -t upload` (I run this myself)
-- Native unittest of the retention policy (no hardware needed): `pio test -e native`
+- Native unittests of the retention policy and SD card paths (no hardware needed): `pio test -e native`
 - Connected boards: `pio device list`
 - Serial monitor (always with a time limit): `pio device monitor`
 
