@@ -8,7 +8,7 @@ brother; requirements are in docs/behuizing.md. Many modules come from the
 home-monitor project.
 
 ## Rules
-- When you give information, be very concise and sacrifice grammar for the sake of conciseness.
+- When reporting information to me, be extremely concise and sacrifice grammar for the sake of concision.
 - Everything in this repo is in English (code, comments, logs, commits, PRs, docs),
   except NOTES.md and docs/behuizing.md, which stay Dutch.
 - Small steps: one phase per branch and PR. Working first, then nice.
