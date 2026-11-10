@@ -4,8 +4,8 @@
 
 namespace Retention {
 
-std::vector<std::string> filesToDelete(std::vector<DayFileInfo> days, uint32_t freeBytes,
-                                        uint32_t minFreeBytes, const std::string& currentDayFile) {
+std::vector<std::string> filesToDelete(std::vector<DayFileInfo> days, uint64_t freeBytes,
+                                        uint64_t minFreeBytes, const std::string& currentDayFile) {
   std::vector<DayFileInfo> candidates;
   candidates.reserve(days.size());
   for (const DayFileInfo& day : days) {

@@ -35,4 +35,20 @@ bool writeMeasurement(const SensorReading& reading, time_t measuredAtUtc);
 // logs on any error.
 bool savePhoto(const uint8_t* data, size_t len, time_t takenAtUtc);
 
+// Appends one line "epoch,firmware_version,reset_reason\n" to
+// /data/boots.csv. Call once per boot, after time has synced (a boot
+// record needs a real epoch). Returns false and logs on any error.
+bool writeBootRecord(time_t bootEpochUtc, const char* firmwareVersion, const char* resetReason);
+
+// Current free space on the mounted card. Only valid when the card is
+// mounted (begin() returned ok); callers must check that themselves.
+uint64_t freeSpaceBytes();
+
+// If free space is below Retention::kMinFreeBytes, deletes the oldest
+// /photos/YYYY-MM-DD directories (via retention.h's pure policy) until
+// enough space is free again. Never deletes nowUtc's own day directory,
+// never touches /data (CSV files). Call at most once per hour (see
+// main.cpp); this walks the whole /photos directory tree.
+void enforceRetention(time_t nowUtc);
+
 }  // namespace SdStorage
