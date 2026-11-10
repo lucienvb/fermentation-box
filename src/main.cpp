@@ -3,6 +3,7 @@
 
 #include "camera.h"
 #include "diag.h"
+#include "flash_settings.h"
 #include "ota.h"
 #include "photo_schedule.h"
 #include "sd_storage.h"
@@ -74,7 +75,7 @@ void takePhoto(time_t nowUtc) {
   // one, see camera_gate.h.
   Web::setScheduledPhotoBusy(true);
   unsigned long captureStartMs = millis();
-  Camera::PhotoResult photo = Camera::capture(/*withFlash=*/false);
+  Camera::PhotoResult photo = Camera::capture(Camera::flashBrightnessPercent());
   unsigned long captureMs = millis() - captureStartMs;
   Web::setScheduledPhotoBusy(false);
 
@@ -132,6 +133,11 @@ void setup() {
   }
 
   Camera::begin();  // Prints its own ok/fail, see camera.cpp.
+  FlashSettings::begin();
+  Camera::setFlashBrightnessPercent(FlashSettings::loadBrightnessPercent());
+  Serial.print("Flash brightness (schedule): ");
+  Serial.print(Camera::flashBrightnessPercent());
+  Serial.println("%");
 
   Sensor::begin();
   delay(kSensorWarmupMs);

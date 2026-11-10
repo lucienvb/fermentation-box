@@ -23,13 +23,22 @@ struct PhotoResult {
 };
 
 // Takes one JPEG photo (SVGA, 800x600). Discards one frame first so exposure
-// can adjust. When withFlash: LED (GPIO4) on, short warmup, discard a frame,
-// take the photo, LED off immediately (also on every error path below) -
-// the LED never stays on.
-PhotoResult capture(bool withFlash);
+// can adjust. flashBrightnessPercent (0-100, see flash_duty.h): 0 means no
+// flash at all; any other value drives the LED (GPIO4, PWM via LEDC) at
+// that brightness for a short warmup, discards a frame, takes the photo,
+// then turns the LED off immediately - also on every error path below, so
+// it never stays on.
+PhotoResult capture(int flashBrightnessPercent);
 
 // Returns the framebuffer to the driver. Always call after a successful
 // capture(), once the photo has been saved/sent.
 void release(camera_fb_t* fb);
+
+// Flash brightness (0-100) used for scheduled photos (main.cpp). Defaults
+// to FlashSettings::kDefaultBrightnessPercent until main.cpp loads the
+// saved value at boot; the setup page's "Use for schedule" button updates
+// it at runtime via setFlashBrightnessPercent.
+void setFlashBrightnessPercent(int percent);
+int flashBrightnessPercent();
 
 }  // namespace Camera

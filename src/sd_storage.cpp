@@ -19,6 +19,13 @@ namespace {
 // (GPIO4) is left untouched by the SD driver.
 constexpr int kFlashLedPin = 4;
 
+// Guards the defensive pinMode()/digitalWrite() below so it only runs on
+// the very first call (setup(), before Camera::begin() attaches GPIO4 to
+// LEDC - see camera.cpp). Later retry calls (main.cpp's SD remount loop)
+// must not touch this pin: pinMode()/digitalWrite() on a pin already
+// attached to an LEDC channel detaches it, silently breaking the flash.
+bool flashPinInitialized = false;
+
 constexpr const char* kPhotosDir = "/photos";
 constexpr const char* kBootsCsvPath = "/data/boots.csv";
 
@@ -79,8 +86,11 @@ bool deleteDirectoryRecursive(const char* dirPath) {
 namespace SdStorage {
 
 BeginInfo begin() {
-  pinMode(kFlashLedPin, OUTPUT);
-  digitalWrite(kFlashLedPin, LOW);
+  if (!flashPinInitialized) {
+    pinMode(kFlashLedPin, OUTPUT);
+    digitalWrite(kFlashLedPin, LOW);
+    flashPinInitialized = true;
+  }
 
   BeginInfo info = {false, 0, 0};
 

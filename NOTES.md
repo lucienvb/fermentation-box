@@ -95,12 +95,26 @@ Diagnoseladder bij uploadproblemen: zie poort (`pio device list` / `ls /dev/cu.*
 - Eén camera-gebruiker tegelijk: niet apart afgedwongen met een lock — de hoofdloop is single-threaded en synchroon (`WebServer::handleClient()` en de geplande foto draaien nooit écht tegelijk), dus dat volgt al uit het bestaande ontwerp.
 - `FIRMWARE_VERSION` naar `0.4.0`.
 
+## F2c: gedimde flitser in plaats van een altijd-aan lampje (10 november 2026)
+
+- Besluit: bij elke foto (schema én testfoto's) kort en gedimd de flitser-LED (GPIO4) aanzetten in plaats van het USB-lampje dat altijd aan staat (zie "Licht" onder "Tooling en ontwerp" hierboven). Reden: er is (nog) geen lampje dat permanent aanstaat bij de uiteindelijke opstelling; de flitser kort en op lage helderheid gebruiken voorkomt dat de pot de hele tijd verlicht/opgewarmd wordt door een lamp, en hergebruikt de LED die er al zit.
+- GPIO4 in 1-bit SD-modus: al bevestigd in F1 hierboven (D1-lijn, niet gebruikt door de SD_MMC-driver in 1-bit-modus), zelfde bronnen (ESP-IDF sdmmc_host docs + arduino-esp32 SD_MMC-broncode).
+- Helderheid nu PWM via LEDC in plaats van aan/uit (`digitalWrite`): `camera.cpp` zet GPIO4 op een eigen LEDC-kanaal (kanaal 7, 5 kHz, 8-bit resolutie — los van kanaal 0/timer 0 die de camera zelf gebruikt voor de XCLK-klok). Percentage (0–100%) → duty-waarde is pure logica in `flash_duty.h/.cpp` (`dutyForPercent`, native getest vóór de implementatie); 0% = flitser helemaal uit.
+- Standaard 15% (`FlashSettings::kDefaultBrightnessPercent`), 200 ms opwarmtijd vóór het weggegooide frame (zelfde waarde als de thuismeter) — zie `camera.cpp`'s bestaande `kFlashWarmupMs`, ongewijzigd.
+- `Camera::capture()` nam eerst een `bool withFlash`; nu een `int flashBrightnessPercent` (0 = geen flitser) zodat elke aanroeper zijn eigen helderheid kan kiezen: het schema gebruikt `Camera::flashBrightnessPercent()` (het ingestelde/opgeslagen percentage), een testfoto mag een ander percentage opgeven via `?brightness=` zonder het schema-percentage te veranderen.
+- Opslag van het schema-percentage in NVS (`flash_settings.h/.cpp`, `Preferences`, namespace `"flash"`) zodat het een herstart overleeft. Geladen in `main.cpp`'s `setup()` na `Camera::begin()`, met `FlashSettings::kDefaultBrightnessPercent` (15%) als terugval zolang er nog niets is opgeslagen.
+- Opstelpagina: keuzelijst (0/10/15/25/50/100%) voor testfoto's, laadt bij openen het huidige schema-percentage (`GET /api/flash/brightness`) als startwaarde; knop "Use for schedule" stuurt `POST /api/flash/brightness?percent=N`, dat zowel NVS bijwerkt als `Camera::setFlashBrightnessPercent()` direct toepast (geen herstart nodig). Elke testfoto toont het gebruikte percentage (uit de `X-Flash-Brightness-Percent`-responseheader, want de foto-response zelf is alleen de JPEG) naast de bestandsgrootte.
+- Nooit aan blijven staan: `Camera::begin()` zet de LED bij elke opstart (ook na een watchdog-herstart) eerst expliciet op duty 0, vóórdat er iets anders gebeurt; `capture()` zet de LED ook op elk foutpad direct weer uit (ongewijzigd gedrag, nu via LEDC in plaats van `digitalWrite`).
+- Bijwerking tijdens het bouwen: `sd_storage.cpp`'s bestaande defensieve "GPIO4 laag zetten na het mounten van de SD-kaart" (zie F1 hierboven) draaide bij élke aanroep van `SdStorage::begin()`, dus ook bij de 5-minuten-hermount-cyclus in `main.cpp` als de SD-kaart ooit mislukt. Een `pinMode()`/`digitalWrite()` op een pin die al aan een LEDC-kanaal hangt, koppelt die LEDC-koppeling los — dat zou de flitser na zo'n hermount stil laten stoppen met werken (niet aan laten blijven staan; failsafe, maar wel een regressie). Opgelost met een eenmalige guard (`flashPinInitialized`): de defensieve zet draait alleen nog bij de allereerste aanroep in `setup()`, vóór `Camera::begin()` de pin aan LEDC koppelt.
+- `FIRMWARE_VERSION` naar `0.5.0`.
+
 ## Nog te doen
 
 - Op hardware testen: eerste USB-upload, wifi-verbinding, NTP-sync, DHT22-meting, watchdog, OTA-upload naar 0.1.1 (stappen staan in de PR-beschrijving/eindmelding van F0).
 - ~~Op hardware testen: F1-spike (SD + camera + DHT22 tegelijk, OTA naar 0.2.0).~~ Gelukt op 9–10 november, zie hierboven. Nog door te geven: bytegrootte van één foto en capture/save-tijd in ms uit de serial-log.
 - Op hardware testen: F2 (fotoschema, bewaarbeleid, bootlog, OTA naar 0.3.0) — één nacht doordraaien.
 - Op hardware testen: F2b (opstelpagina, OTA naar 0.4.0) — camera en pot richten, schema-voorrang vlak voor een kwartier, referentiefoto opslaan.
+- Op hardware testen: F2c (gedimde flitser, OTA naar 0.5.0) — testfoto's bij elk keuzelijst-percentage (zichtbaar helderheidsverschil, geen overbelichting bij 100%), "Use for schedule" + herstart (percentage moet blijven staan), een nacht met de SD-kaart tijdelijk eruit (hermount-cyclus) om te checken dat de flitser daarna nog steeds werkt.
 - **Als de SD-kaart uitvalt, gaan metingen en foto's verloren** (geen terugval naar LittleFS). Bewust, voorlopig: LittleFS heeft met OTA maar ~1,4 MiB ruimte (zie projectdocument §7, punt 2), genoeg voor metingen maar niet voor foto's; een aparte terugvalopslag is meer ontwerpwerk dan deze fase toelaat.
 - F3: lokale webpagina (basis uit de thuismeter, `web.cpp`).
 - Later: cloud-koppeling (Supabase, device-token), doelbereik/alerts, verwarmen.

@@ -44,7 +44,7 @@ home-monitor project.
 ## Structure and commands
 
 ### Stack
-- PlatformIO Core (CLI), environments `esp32cam` (USB), `esp32cam_ota` (OTA, extends `esp32cam`), `native` (pure-logic tests only: retention policy, SD card paths, photo schedule, test-photo gate).
+- PlatformIO Core (CLI), environments `esp32cam` (USB), `esp32cam_ota` (OTA, extends `esp32cam`), `native` (pure-logic tests only: retention policy, SD card paths, photo schedule, test-photo gate, flash brightness math).
 - Framework: Arduino. Platform: `espressif32@6.9.0` (pinned in platformio.ini).
 - Libraries: `adafruit/DHT sensor library@1.4.7`, `adafruit/Adafruit Unified Sensor@1.1.15`. No other libraries.
 - mDNS / OTA hostname: `fermentatiebox`.
@@ -54,15 +54,17 @@ home-monitor project.
 - `wifi_time.h/.cpp` — wifi connection (with reconnect) and NTP time, internally UTC.
 - `diag.h/.cpp` — reset reason.
 - `ota.h/.cpp` — ArduinoOTA (wireless firmware update), hostname `fermentatiebox`, password from `include/secrets.h` (`OTA_PASSWORD`).
-- `camera.h/.cpp` — OV2640 photo capture (SVGA), pins from Espressif's `camera_pins.h` (`CAMERA_MODEL_AI_THINKER`), PSRAM-dependent buffer count. Taken from the home-monitor project.
+- `camera.h/.cpp` — OV2640 photo capture (SVGA), pins from Espressif's `camera_pins.h` (`CAMERA_MODEL_AI_THINKER`), PSRAM-dependent buffer count. Taken from the home-monitor project. Flash LED (GPIO4) driven by LEDC PWM at a settable brightness (0-100%, see `flash_duty.h`); explicit off at every `begin()` so it never survives a watchdog reset.
+- `flash_duty.h/.cpp` — pure function turning a brightness percent (0-100) into an LEDC duty value, with clamping. Native tested.
+- `flash_settings.h/.cpp` — persists the flash brightness used for scheduled photos in NVS (`Preferences`), so the setup page's "Use for schedule" button survives a restart.
 - `paths.h/.cpp` — pure functions turning a UTC time into the fixed SD card paths (`/data/YYYY-MM-DD.csv`, `/photos/YYYY-MM-DD/HHMMSS.jpg`). Native tested.
 - `photo_schedule.h/.cpp` — pure functions deciding when a photo is due, on fixed UTC clock times (e.g. :00/:15/:30/:45 for a 15-minute interval), from the clock rather than a counter in memory. Native tested.
 - `sd_storage.h/.cpp` — SD card start in 1-bit mode, CSV append and photo save using `paths.h`; boot record append (`/data/boots.csv`); retention enforcement on `/photos` day directories using `retention.h`.
 - `retention.h/.cpp` — pure function deciding which day directories to delete under low free space (never today's, never `/data` CSV files). Wired into `sd_storage.cpp` from F2 onward. Native tested.
 - `camera_gate.h/.cpp` — pure function deciding whether a test photo (setup page) may be taken now: the fixed photo schedule always wins (busy, or due within 5 s), then a 3-second rate limit between test photos. Native tested.
-- `web.h/.cpp` — synchronous `WebServer` (F2b): setup page (`/`) and camera endpoints (`GET /api/photo`, `POST /api/photo/reference`), Basic Auth from `include/secrets.h` (`CAMERA_USER`/`CAMERA_PASSWORD`). Page HTML/JS lives in `web_setup_page.h/.cpp` so this file stays small. Basis for the F3 local page.
+- `web.h/.cpp` — synchronous `WebServer` (F2b): setup page (`/`) and camera endpoints (`GET /api/photo`, `POST /api/photo/reference`), plus flash brightness endpoints (`GET`/`POST /api/flash/brightness`, F2c), Basic Auth from `include/secrets.h` (`CAMERA_USER`/`CAMERA_PASSWORD`). Page HTML/JS lives in `web_setup_page.h/.cpp` so this file stays small. Basis for the F3 local page.
 - `version.h` — `FIRMWARE_VERSION`, bumped on every firmware PR.
-- `main.cpp` — stays short: setup/loop calling the modules. F2 scope: 1-minute measurement interval, 15-minute photo schedule (`photo_schedule.h`), hourly retention check and status line, SD remount retry every 5 minutes, boot record once time is synced. F2b adds the setup web page (`web.h`).
+- `main.cpp` — stays short: setup/loop calling the modules. F2 scope: 1-minute measurement interval, 15-minute photo schedule (`photo_schedule.h`), hourly retention check and status line, SD remount retry every 5 minutes, boot record once time is synced. F2b adds the setup web page (`web.h`). F2c loads the saved flash brightness (`flash_settings.h`) into `camera.h` at boot.
 
 ### Commands
 - Build (`esp32cam`, the default): `pio run`
