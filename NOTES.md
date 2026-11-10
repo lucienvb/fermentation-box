@@ -63,12 +63,15 @@ Diagnoseladder bij uploadproblemen: zie poort (`pio device list` / `ls /dev/cu.*
 - `FIRMWARE_VERSION` naar `0.2.0`.
 - Eén gecombineerd interval (1 minuut) voor zowel meting als foto in deze spike; F2 splitst dit in een 1-minuut-meting en een 15-minuten-fotoschema (los, pure functies, tests eerst).
 - `SD_MMC.begin("/sdcard", true, /*format_if_mount_failed=*/false)`: kaart wordt NIET geformatteerd bij een mislukte mount (voorkomt dataverlies op een kaart met oude data); een mislukte mount wordt alleen gelogd.
-- Nog niet gemeten op hardware: werkelijke kaartgrootte/vrije ruimte, `psramFound()`, vrije heap/PSRAM, grootte van één SVGA-foto, of de flitser-LED echt uit blijft tijdens het starten van de SD-kaart. Zie de vragen in de eindmelding van de F1-PR.
+
+**Op hardware bevestigd (9–10 november 2026):** SD-kaart (14910 MB, 14893 MB vrij), camera (SVGA, PSRAM: ja) en DHT22 starten alle drie goed, `psramFound()`: ja, vrije heap 238632 bytes, vrije PSRAM 3973123 bytes direct na opstarten. Na een voedingswissel (zie brownout-bevinding hieronder) heeft het board twee dagen achter elkaar aan het stopcontact gehangen en staan er voor beide dagen een CSV-bestand in `/data` en een map met jpg's in `/photos` op de kaart: de volledige cyclus (SD + camera + DHT22 + wifi, elke minuut meting + foto) draait dus stabiel door. Nog niet apart gemeten: bytegrootte van één foto en capture/save-tijd in ms (staan al in de serial-log als het board aan de PC hangt, nog niet doorgegeven).
+
+**Brownout bij opstarten (9 november 2026):** board bleef resetten ("Brownout detector was triggered") steeds net na het printen van de opstartdiagnostiek, vóór de wifi-verbinding lukte — `Diag::resetReasonString()` gaf hier terecht `brownout (power supply too low)`. Oorzaak: voeding via de datakabel van een PC-USB-poort (vaak maar 0,5–0,9 A); SD + camera (PSRAM, 2 framebuffers) + wifi-radio trekken samen een stroompiek die de PC-poort niet aankan. **Fix: voeden via een losse 5V/2A+ wandlader in plaats van de PC**, zoals al in hoofdstuk "Basis" hierboven staat — met die voeding draaide het board stabiel door (zie boven). Dit is dus geen firmwarebug; wel een reden om bij toekomstige stroompieken (bv. als het verwarmen erbij komt) eerst de voeding te controleren vóór je in de code gaat zoeken.
 
 ## Nog te doen
 
 - Op hardware testen: eerste USB-upload, wifi-verbinding, NTP-sync, DHT22-meting, watchdog, OTA-upload naar 0.1.1 (stappen staan in de PR-beschrijving/eindmelding van F0).
-- Op hardware testen: F1-spike (SD + camera + DHT22 tegelijk, OTA naar 0.2.0) — zie eindmelding van de F1-PR voor wat ik in de seriële monitor moet zien.
+- ~~Op hardware testen: F1-spike (SD + camera + DHT22 tegelijk, OTA naar 0.2.0).~~ Gelukt op 9–10 november, zie hierboven. Nog door te geven: bytegrootte van één foto en capture/save-tijd in ms uit de serial-log.
 - F2: elke minuut een meting en elke 15 minuten een foto naar de SD-kaart, fotoschema en bewaarbeleid als pure functie met tests eerst. SD-bewaarbeleid (`retention.h/.cpp` bestaat al als pure functie, nog niet aan SD gekoppeld).
 - F3: lokale webpagina (basis uit de thuismeter, `web.cpp`).
 - Later: cloud-koppeling (Supabase, device-token), doelbereik/alerts, verwarmen.
