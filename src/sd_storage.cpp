@@ -165,6 +165,39 @@ bool savePhoto(const uint8_t* data, size_t len, time_t takenAtUtc) {
   return true;
 }
 
+bool saveReferencePhoto(const uint8_t* data, size_t len, time_t takenAtUtc) {
+  if (!data || len == 0 || takenAtUtc <= 0) {
+    return false;
+  }
+
+  constexpr const char* kReferenceDir = "/photos/reference";
+  if (!SD_MMC.exists(kReferenceDir) && !SD_MMC.mkdir(kReferenceDir)) {
+    Serial.print("SD error: could not create ");
+    Serial.println(kReferenceDir);
+    return false;
+  }
+
+  char filePath[48];
+  Paths::referencePhotoPath(takenAtUtc, filePath, sizeof(filePath));
+
+  File f = SD_MMC.open(filePath, FILE_WRITE);
+  if (!f) {
+    Serial.print("SD error: could not open ");
+    Serial.println(filePath);
+    return false;
+  }
+
+  size_t written = f.write(data, len);
+  f.close();
+
+  if (written != len) {
+    Serial.print("SD error: reference photo not fully written to ");
+    Serial.println(filePath);
+    return false;
+  }
+  return true;
+}
+
 bool writeBootRecord(time_t bootEpochUtc, const char* firmwareVersion, const char* resetReason) {
   if (bootEpochUtc <= 0 || !firmwareVersion || !resetReason) {
     return false;

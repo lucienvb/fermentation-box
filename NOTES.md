@@ -82,11 +82,25 @@ Diagnoseladder bij uploadproblemen: zie poort (`pio device list` / `ls /dev/cu.*
 - Eén statusregel per uur in de seriële monitor (`kHourlyMs`, zelfde interval als het bewaarbeleid maar los bijgehouden): aantal foto's, aantal metingen, aantal fouten sinds opstarten, vrije ruimte op de kaart, vrije heap.
 - `FIRMWARE_VERSION` naar `0.3.0`.
 
+## F2b: opstelpagina om camera en pot te richten (10 november 2026)
+
+- Nieuwe module `web.h/.cpp` (synchrone `WebServer`, zelfde model als het cameratabblad van de thuismeter): pagina `/`, endpoints `GET /api/photo` en `POST /api/photo/reference`. HTML/JS van de pagina zelf staat los in `web_setup_page.h/.cpp` (PROGMEM), zodat `web.cpp` niet te groot wordt — zelfde opsplitsing als `web_camera_tab.h/.cpp` in de thuismeter. Basis Auth op beide camera-endpoints (`CAMERA_USER`/`CAMERA_PASSWORD` in `include/secrets.h`, placeholder in `secrets.example.h`).
+- Nieuwe module `camera_gate.h/.cpp` (pure functie, native getest vóór de implementatie): `CameraGate::canTakeTestPhoto()` beslist of een testfoto nu mag, met twee regels, in deze volgorde (bij allebei "nee" wint de eerste):
+  1. **Fotoschema gaat voor.** Een geplande foto bezig (`Web::setScheduledPhotoBusy(true/false)`, gezet rond `Camera::capture()` in `main.cpp`'s `takePhoto()`) of binnen `kScheduleGuardSeconds` (5 s) gepland: 503, met `Retry-After`.
+  2. **Snelheidslimiet op testfoto's.** Hooguit één per `kMinTestPhotoIntervalMs` (3000 ms): anders 429, met `Retry-After`.
+- `GET /api/photo`: zelfde camera-instellingen als het schema (`Camera::capture(withFlash=false)`, dus ook eerst één frame weggooien — zie `camera.cpp`), `Cache-Control: no-store`. Testfoto's komen NIET op de SD-kaart. De foto wordt na het maken direct uit het camera-framebuffer gekopieerd naar een los PSRAM-buffer (`ps_malloc`) en de camera-buffer wordt onmiddellijk ge-`release()`d — zie CLAUDE.md "release photo buffers immediately". Dat PSRAM-buffer is ook wat "Save as reference" straks wegschrijft, zonder een nieuwe camera-aanroep.
+- `POST /api/photo/reference`: schrijft dat laatste testfoto-buffer naar `/photos/reference/YYYY-MM-DD_HHMMSS.jpg` (UTC) via `SdStorage::saveReferencePhoto()` (nieuw, zelfde patroon als `savePhoto()`) en `Paths::referencePhotoPath()` (nieuw, native getest). 409 als er nog geen testfoto is.
+- Rasteroverlay (kruis + derdelijnen) is puur in de browser (canvas, getekend over de `<img>`), geen firmware-kant.
+- mDNS-hostname (`fermentatiebox.local`) komt al van `Ota::begin()` (ArduinoOTA registreert mDNS zelf); de opstelpagina heeft dus geen eigen mDNS-aanroep nodig.
+- Eén camera-gebruiker tegelijk: niet apart afgedwongen met een lock — de hoofdloop is single-threaded en synchroon (`WebServer::handleClient()` en de geplande foto draaien nooit écht tegelijk), dus dat volgt al uit het bestaande ontwerp.
+- `FIRMWARE_VERSION` naar `0.4.0`.
+
 ## Nog te doen
 
 - Op hardware testen: eerste USB-upload, wifi-verbinding, NTP-sync, DHT22-meting, watchdog, OTA-upload naar 0.1.1 (stappen staan in de PR-beschrijving/eindmelding van F0).
 - ~~Op hardware testen: F1-spike (SD + camera + DHT22 tegelijk, OTA naar 0.2.0).~~ Gelukt op 9–10 november, zie hierboven. Nog door te geven: bytegrootte van één foto en capture/save-tijd in ms uit de serial-log.
 - Op hardware testen: F2 (fotoschema, bewaarbeleid, bootlog, OTA naar 0.3.0) — één nacht doordraaien.
+- Op hardware testen: F2b (opstelpagina, OTA naar 0.4.0) — camera en pot richten, schema-voorrang vlak voor een kwartier, referentiefoto opslaan.
 - **Als de SD-kaart uitvalt, gaan metingen en foto's verloren** (geen terugval naar LittleFS). Bewust, voorlopig: LittleFS heeft met OTA maar ~1,4 MiB ruimte (zie projectdocument §7, punt 2), genoeg voor metingen maar niet voor foto's; een aparte terugvalopslag is meer ontwerpwerk dan deze fase toelaat.
 - F3: lokale webpagina (basis uit de thuismeter, `web.cpp`).
 - Later: cloud-koppeling (Supabase, device-token), doelbereik/alerts, verwarmen.
