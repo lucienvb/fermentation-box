@@ -56,10 +56,11 @@ home-monitor project.
 - `ota.h/.cpp` — ArduinoOTA (wireless firmware update), hostname `fermentatiebox`, password from `include/secrets.h` (`OTA_PASSWORD`).
 - `camera.h/.cpp` — OV2640 photo capture (SVGA), pins from Espressif's `camera_pins.h` (`CAMERA_MODEL_AI_THINKER`), PSRAM-dependent buffer count. Taken from the home-monitor project.
 - `paths.h/.cpp` — pure functions turning a UTC time into the fixed SD card paths (`/data/YYYY-MM-DD.csv`, `/photos/YYYY-MM-DD/HHMMSS.jpg`). Native tested.
-- `sd_storage.h/.cpp` — SD card start in 1-bit mode, CSV append and photo save using `paths.h`.
-- `retention.h/.cpp` — pure function deciding which day files to delete under low free space. Not wired into the firmware yet (SD retention policy follows in F2); covered by a native test so that env stays meaningful from F0 onward.
+- `photo_schedule.h/.cpp` — pure functions deciding when a photo is due, on fixed UTC clock times (e.g. :00/:15/:30/:45 for a 15-minute interval), from the clock rather than a counter in memory. Native tested.
+- `sd_storage.h/.cpp` — SD card start in 1-bit mode, CSV append and photo save using `paths.h`; boot record append (`/data/boots.csv`); retention enforcement on `/photos` day directories using `retention.h`.
+- `retention.h/.cpp` — pure function deciding which day directories to delete under low free space (never today's, never `/data` CSV files). Wired into `sd_storage.cpp` from F2 onward. Native tested.
 - `version.h` — `FIRMWARE_VERSION`, bumped on every firmware PR.
-- `main.cpp` — stays short: setup/loop calling the modules. F1 scope: SD card (1-bit) + camera + DHT22 together, one combined measurement+photo interval, connect wifi, sync NTP, OTA, watchdog. No retention policy wired in yet, no web page (F2/F3).
+- `main.cpp` — stays short: setup/loop calling the modules. F2 scope: 1-minute measurement interval, 15-minute photo schedule (`photo_schedule.h`), hourly retention check and status line, SD remount retry every 5 minutes, boot record once time is synced. No web page yet (F3).
 
 ### Commands
 - Build (`esp32cam`, the default): `pio run`
