@@ -35,6 +35,11 @@ bool writeMeasurement(const SensorReading& reading, time_t measuredAtUtc);
 // logs on any error.
 bool savePhoto(const uint8_t* data, size_t len, time_t takenAtUtc);
 
+// Writes `len` bytes to /photos/reference/YYYY-MM-DD_HHMMSS.jpg (F2b setup
+// page, "Save as reference"), creating the directory if needed. Returns
+// false and logs on any error.
+bool saveReferencePhoto(const uint8_t* data, size_t len, time_t takenAtUtc);
+
 // Appends one line "epoch,firmware_version,reset_reason\n" to
 // /data/boots.csv. Call once per boot, after time has synced (a boot
 // record needs a real epoch). Returns false and logs on any error.

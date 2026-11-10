@@ -34,4 +34,12 @@ void photoFilePath(time_t utcTime, char* buf, size_t bufSize) {
   snprintf(buf, bufSize, "/photos/%s/%s.jpg", day, hms);
 }
 
+void referencePhotoPath(time_t utcTime, char* buf, size_t bufSize) {
+  char day[11];
+  char hms[7];
+  formatUtc(utcTime, "%Y-%m-%d", day, sizeof(day));
+  formatUtc(utcTime, "%H%M%S", hms, sizeof(hms));
+  snprintf(buf, bufSize, "/photos/reference/%s_%s.jpg", day, hms);
+}
+
 }  // namespace Paths

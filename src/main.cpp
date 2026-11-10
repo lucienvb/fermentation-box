@@ -8,6 +8,7 @@
 #include "sd_storage.h"
 #include "sensor.h"
 #include "version.h"
+#include "web.h"
 #include "wifi_time.h"
 
 namespace {
@@ -68,9 +69,14 @@ void takeMeasurement(time_t nowUtc) {
 }
 
 void takePhoto(time_t nowUtc) {
+  // Set/cleared around the capture only (not the SD write): CameraGate uses
+  // this so a test photo request never lands in the middle of a scheduled
+  // one, see camera_gate.h.
+  Web::setScheduledPhotoBusy(true);
   unsigned long captureStartMs = millis();
   Camera::PhotoResult photo = Camera::capture(/*withFlash=*/false);
   unsigned long captureMs = millis() - captureStartMs;
+  Web::setScheduledPhotoBusy(false);
 
   if (!photo.ok) {
     Serial.print("Camera error: ");
@@ -136,6 +142,7 @@ void setup() {
   printStartupDiagnostics();
 
   WifiTime::begin();
+  Web::begin();
 }
 
 void loop() {
@@ -154,6 +161,8 @@ void loop() {
     // flash and CPU during an update.
     return;
   }
+
+  Web::handleClient();
 
   unsigned long nowMs = millis();
 

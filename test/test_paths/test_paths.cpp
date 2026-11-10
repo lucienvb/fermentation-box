@@ -56,6 +56,12 @@ void test_photo_file_path_shares_day_with_dir_path() {
   TEST_ASSERT_EQUAL_STRING("/photos/2026-12-31/235959.jpg", fileBuf);
 }
 
+void test_reference_photo_path() {
+  char buf[48];
+  Paths::referencePhotoPath(utc(2026, 11, 10, 14, 5, 30), buf, sizeof(buf));
+  TEST_ASSERT_EQUAL_STRING("/photos/reference/2026-11-10_140530.jpg", buf);
+}
+
 int main(int argc, char** argv) {
   UNITY_BEGIN();
   RUN_TEST(test_measurement_csv_path);
@@ -63,5 +69,6 @@ int main(int argc, char** argv) {
   RUN_TEST(test_photo_file_path);
   RUN_TEST(test_paths_zero_pad_single_digit_values);
   RUN_TEST(test_photo_file_path_shares_day_with_dir_path);
+  RUN_TEST(test_reference_photo_path);
   return UNITY_END();
 }

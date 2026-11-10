@@ -18,4 +18,9 @@ void photoDirPath(time_t utcTime, char* buf, size_t bufSize);
 // "/photos/YYYY-MM-DD/HHMMSS.jpg"
 void photoFilePath(time_t utcTime, char* buf, size_t bufSize);
 
+// "/photos/reference/YYYY-MM-DD_HHMMSS.jpg" (F2b setup page, "Save as
+// reference"). A fixed directory rather than one per day: there is only
+// ever a handful of these, kept across days.
+void referencePhotoPath(time_t utcTime, char* buf, size_t bufSize);
+
 }  // namespace Paths
