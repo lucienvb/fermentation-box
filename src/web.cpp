@@ -9,6 +9,8 @@
 
 #include "camera.h"
 #include "camera_gate.h"
+#include "flash_duty.h"
+#include "flash_settings.h"
 #include "paths.h"
 #include "photo_schedule.h"
 #include "sd_storage.h"
@@ -64,7 +66,14 @@ void handleApiPhoto() {
     return;
   }
 
-  Camera::PhotoResult result = Camera::capture(/*withFlash=*/false);
+  // Optional ?brightness=0-100 (setup page's flash selector); defaults to
+  // whatever the schedule currently uses, so a plain "Take test photo"
+  // shows exactly what the next scheduled photo will look like.
+  int brightnessPercent = server.hasArg("brightness")
+                               ? FlashDuty::clampPercent(server.arg("brightness").toInt())
+                               : Camera::flashBrightnessPercent();
+
+  Camera::PhotoResult result = Camera::capture(brightnessPercent);
   if (!result.ok) {
     Serial.print("Camera error: ");
     Serial.println(result.error);
@@ -92,6 +101,7 @@ void handleApiPhoto() {
   }
 
   server.sendHeader("Cache-Control", "no-store");
+  server.sendHeader("X-Flash-Brightness-Percent", String(brightnessPercent));
   server.setContentLength(gLastPhotoLen);
   server.send(200, "image/jpeg", "");
   server.sendContent(reinterpret_cast<const char*>(gLastPhotoBuffer), gLastPhotoLen);
@@ -119,6 +129,37 @@ void handleApiPhotoReference() {
   server.send(200, "application/json", json);
 }
 
+// Current flash brightness used for scheduled photos (Camera::
+// flashBrightnessPercent()), so the setup page can show/preselect it.
+void handleApiFlashBrightnessGet() {
+  if (!checkAuth()) {
+    return;
+  }
+  char json[48];
+  snprintf(json, sizeof(json), "{\"percent\":%d}", Camera::flashBrightnessPercent());
+  server.send(200, "application/json", json);
+}
+
+// "Use for schedule": persists ?percent=0-100 (NVS, survives a restart) and
+// applies it immediately to the next scheduled photo.
+void handleApiFlashBrightnessPost() {
+  if (!checkAuth()) {
+    return;
+  }
+  if (!server.hasArg("percent")) {
+    server.send(400, "text/plain", "Missing percent");
+    return;
+  }
+
+  int percent = FlashDuty::clampPercent(server.arg("percent").toInt());
+  FlashSettings::saveBrightnessPercent(percent);
+  Camera::setFlashBrightnessPercent(percent);
+
+  char json[48];
+  snprintf(json, sizeof(json), "{\"ok\":true,\"percent\":%d}", percent);
+  server.send(200, "application/json", json);
+}
+
 }  // namespace
 
 namespace Web {
@@ -127,6 +168,8 @@ void begin() {
   server.on("/", handleRoot);
   server.on("/api/photo", HTTP_GET, handleApiPhoto);
   server.on("/api/photo/reference", HTTP_POST, handleApiPhotoReference);
+  server.on("/api/flash/brightness", HTTP_GET, handleApiFlashBrightnessGet);
+  server.on("/api/flash/brightness", HTTP_POST, handleApiFlashBrightnessPost);
   server.begin();
   Serial.println("Web: setup page ready (http://fermentatiebox.local)");
 }

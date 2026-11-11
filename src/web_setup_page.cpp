@@ -38,6 +38,20 @@ const char kSetupPageHtml[] PROGMEM = R"HTML(<!DOCTYPE html>
   <label><input type="checkbox" id="grid-toggle"> Grid overlay</label>
   <button id="reference-btn" disabled>Save as reference</button>
 </div>
+<div class="controls">
+  <label>Flash brightness
+    <select id="brightness-select">
+      <option value="0">0% (off)</option>
+      <option value="10">10%</option>
+      <option value="15">15%</option>
+      <option value="25">25%</option>
+      <option value="50">50%</option>
+      <option value="100">100%</option>
+    </select>
+  </label>
+  <button id="use-for-schedule-btn">Use for schedule</button>
+  <span class="status" id="schedule-status"></span>
+</div>
 <div class="status" id="status"></div>
 <div class="photo-wrap">
   <img id="photo" alt="test photo">
@@ -58,8 +72,19 @@ const char kSetupPageHtml[] PROGMEM = R"HTML(<!DOCTYPE html>
   var grid = document.getElementById('grid');
   var fullsize = document.getElementById('fullsize');
   var fullsizeImg = document.getElementById('fullsize-img');
+  var brightnessSelect = document.getElementById('brightness-select');
+  var useForScheduleBtn = document.getElementById('use-for-schedule-btn');
+  var scheduleStatusEl = document.getElementById('schedule-status');
   var liveTimer = null;
   var hasPhoto = false;
+
+  fetch('/api/flash/brightness').then(function (r) {
+    return r.ok ? r.json() : null;
+  }).then(function (d) {
+    if (d && d.percent !== undefined) {
+      brightnessSelect.value = String(d.percent);
+    }
+  }).catch(function () {});
 
   function drawGrid() {
     if (!gridToggle.checked || photo.clientWidth === 0) {
@@ -88,13 +113,15 @@ const char kSetupPageHtml[] PROGMEM = R"HTML(<!DOCTYPE html>
   function takePhoto() {
     photoBtn.disabled = true;
     statusEl.textContent = 'Taking photo...';
-    fetch('/api/photo').then(function (r) {
+    var brightnessUsed = brightnessSelect.value;
+    fetch('/api/photo?brightness=' + encodeURIComponent(brightnessUsed)).then(function (r) {
       if (!r.ok) {
         var retryAfter = r.headers.get('Retry-After');
         return r.text().then(function (t) {
           throw new Error((t || ('error ' + r.status)) + (retryAfter ? ' (retry in ' + retryAfter + 's)' : ''));
         });
       }
+      brightnessUsed = r.headers.get('X-Flash-Brightness-Percent') || brightnessUsed;
       return r.blob();
     }).then(function (blob) {
       photo.onload = drawGrid;
@@ -103,7 +130,7 @@ const char kSetupPageHtml[] PROGMEM = R"HTML(<!DOCTYPE html>
       hasPhoto = true;
       referenceBtn.disabled = false;
       metaEl.textContent = 'Taken at ' + new Date().toLocaleTimeString() +
-        ' - ' + (blob.size / 1024).toFixed(1) + ' KB';
+        ' - ' + (blob.size / 1024).toFixed(1) + ' KB - flash ' + brightnessUsed + '%';
       statusEl.textContent = '';
     }).catch(function (e) {
       statusEl.textContent = 'Error: ' + e.message;
@@ -133,6 +160,25 @@ const char kSetupPageHtml[] PROGMEM = R"HTML(<!DOCTYPE html>
   });
   fullsize.addEventListener('click', function () {
     fullsize.style.display = 'none';
+  });
+
+  useForScheduleBtn.addEventListener('click', function () {
+    useForScheduleBtn.disabled = true;
+    scheduleStatusEl.textContent = 'Saving...';
+    fetch('/api/flash/brightness?percent=' + encodeURIComponent(brightnessSelect.value), {
+      method: 'POST'
+    }).then(function (r) {
+      if (!r.ok) {
+        return r.text().then(function (t) { throw new Error(t || ('error ' + r.status)); });
+      }
+      return r.json();
+    }).then(function (d) {
+      scheduleStatusEl.textContent = 'Schedule now uses ' + d.percent + '%';
+    }).catch(function (e) {
+      scheduleStatusEl.textContent = 'Error: ' + e.message;
+    }).finally(function () {
+      useForScheduleBtn.disabled = false;
+    });
   });
 
   referenceBtn.addEventListener('click', function () {
