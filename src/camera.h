@@ -2,6 +2,8 @@
 
 #include "esp_camera.h"
 
+#include "camera_settings.h"
+
 // OV2640 camera (AI-Thinker ESP32-CAM). Uses the camera driver already in
 // the Arduino ESP32 core (esp_camera.h), no extra library. Pins come
 // literally from Espressif's official CameraWebServer example
@@ -40,5 +42,17 @@ void release(camera_fb_t* fb);
 // it at runtime via setFlashBrightnessPercent.
 void setFlashBrightnessPercent(int percent);
 int flashBrightnessPercent();
+
+// Applies white balance/exposure/gain (CameraSettings, F2d) to the sensor
+// via the esp32-camera driver's sensor_t function pointers; a no-op if the
+// camera failed to start. Call once at boot with the saved value
+// (CameraSettings::load()) and again whenever the setup page's "Use for
+// schedule" button is used.
+void applySettings(const CameraSettings::Settings& settings);
+
+// The settings last passed to applySettings(), so the setup page/test
+// photos can report what is currently active. CameraSettings::kDefault
+// until applySettings() is called.
+CameraSettings::Settings currentSettings();
 
 }  // namespace Camera

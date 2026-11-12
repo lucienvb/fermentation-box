@@ -26,8 +26,10 @@ struct BeginInfo {
 BeginInfo begin();
 
 // Appends one line "epoch,temperature,humidity\n" to
-// /data/YYYY-MM-DD.csv (day taken from measuredAtUtc). Returns false and
-// logs on any error.
+// /data/YYYY-MM-DD.csv (day taken from measuredAtUtc), or "epoch,,\n" if
+// reading.ok is false (F2d, see NOTES.md) - so a gap in the data is
+// explainable instead of silently missing. Returns false and logs on any
+// error.
 bool writeMeasurement(const SensorReading& reading, time_t measuredAtUtc);
 
 // Writes `len` bytes to /photos/YYYY-MM-DD/HHMMSS.jpg (day/time taken from
@@ -44,6 +46,11 @@ bool saveReferencePhoto(const uint8_t* data, size_t len, time_t takenAtUtc);
 // /data/boots.csv. Call once per boot, after time has synced (a boot
 // record needs a real epoch). Returns false and logs on any error.
 bool writeBootRecord(time_t bootEpochUtc, const char* firmwareVersion, const char* resetReason);
+
+// Appends one pre-formatted status line (status_line.h, built once per
+// hour by main.cpp) plus a newline to /data/status.csv. Returns false and
+// logs on any error.
+bool writeStatusLine(const char* line);
 
 // Current free space on the mounted card. Only valid when the card is
 // mounted (begin() returned ok); callers must check that themselves.

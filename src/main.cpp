@@ -2,12 +2,14 @@
 #include <esp_task_wdt.h>
 
 #include "camera.h"
+#include "camera_settings.h"
 #include "diag.h"
 #include "flash_settings.h"
 #include "ota.h"
 #include "photo_schedule.h"
 #include "sd_storage.h"
 #include "sensor.h"
+#include "status_line.h"
 #include "version.h"
 #include "web.h"
 #include "wifi_time.h"
@@ -32,9 +34,18 @@ unsigned long lastRetentionCheckMs = 0;
 unsigned long lastStatusMs = 0;
 bool bootRecordWritten = false;
 
-uint32_t measurementCount = 0;
-uint32_t photoCount = 0;
-uint32_t errorCount = 0;
+// Since the previous status line (F2d, see NOTES.md): reset to 0 right
+// after each line is built, so /data/status.csv and the serial monitor
+// report per-hour counts rather than since-boot totals.
+uint32_t readingsOkCount = 0;
+uint32_t readingsFailedCount = 0;
+uint32_t photosOkCount = 0;
+uint32_t photosFailedCount = 0;
+char lastErrorMsg[64] = "";
+
+void setLastError(const char* msg) {
+  snprintf(lastErrorMsg, sizeof(lastErrorMsg), "%s", msg);
+}
 
 void printStartupDiagnostics() {
   Serial.print("PSRAM found: ");
@@ -48,23 +59,27 @@ void printStartupDiagnostics() {
 }
 
 void takeMeasurement(time_t nowUtc) {
+  // Sensor::read() already retries once internally on failure (see
+  // sensor.cpp); this is the final result for this minute.
   SensorReading reading = Sensor::read();
-  if (!reading.ok) {
-    Serial.println("Measurement failed: DHT22 returned nan (check wiring)");
-    ++errorCount;
-    return;
+  if (reading.ok) {
+    Serial.printf("Measurement  Temperature: %.1f C  Humidity: %.1f %%\n", reading.temperatureC,
+                  reading.humidityPercent);
+    ++readingsOkCount;
+  } else {
+    Serial.println("Measurement failed: DHT22 returned nan after retry (check wiring)");
+    ++readingsFailedCount;
+    setLastError("DHT22 read failed");
   }
-
-  Serial.printf("Measurement  Temperature: %.1f C  Humidity: %.1f %%\n", reading.temperatureC,
-                reading.humidityPercent);
-  ++measurementCount;
 
   if (!sdReady) {
     return;
   }
+  // Written even on a failed reading (empty fields), so a gap in the data
+  // is explainable - see sd_storage.cpp.
   if (!SdStorage::writeMeasurement(reading, nowUtc)) {
     Serial.println("Storage error: measurement not written (see above)");
-    ++errorCount;
+    setLastError("SD write failed (measurement)");
     sdReady = false;  // Retried from the main loop, see loop() below.
   }
 }
@@ -82,7 +97,8 @@ void takePhoto(time_t nowUtc) {
   if (!photo.ok) {
     Serial.print("Camera error: ");
     Serial.println(photo.error);
-    ++errorCount;
+    ++photosFailedCount;
+    setLastError(photo.error);
     return;
   }
 
@@ -98,12 +114,13 @@ void takePhoto(time_t nowUtc) {
 
   if (!saved) {
     Serial.println("Storage error: photo not saved (see above)");
-    ++errorCount;
+    setLastError("SD write failed (photo)");
     sdReady = false;  // Retried from the main loop, see loop() below.
+    ++photosFailedCount;
     return;
   }
 
-  ++photoCount;
+  ++photosOkCount;
   Serial.printf("Photo saved: %u bytes, capture %lu ms, save %lu ms\n",
                 static_cast<unsigned>(photoLen), captureMs, saveMs);
 }
@@ -138,6 +155,9 @@ void setup() {
   Serial.print("Flash brightness (schedule): ");
   Serial.print(Camera::flashBrightnessPercent());
   Serial.println("%");
+
+  CameraSettings::begin();
+  Camera::applySettings(CameraSettings::load());
 
   Sensor::begin();
   delay(kSensorWarmupMs);
@@ -206,7 +226,7 @@ void loop() {
       bootRecordWritten = true;
     } else {
       Serial.println("Storage error: boot record not written (see above)");
-      ++errorCount;
+      setLastError("SD write failed (boot record)");
       sdReady = false;  // Retried from the main loop above.
     }
   }
@@ -230,12 +250,30 @@ void loop() {
 
   if (nowMs - lastStatusMs >= kHourlyMs) {
     lastStatusMs = nowMs;
-    uint64_t freeSd = sdReady ? SdStorage::freeSpaceBytes() : 0;
-    Serial.printf(
-        "Status: %lu photos, %lu measurements, %lu errors since boot; SD free %llu MB; "
-        "free heap %u bytes\n",
-        static_cast<unsigned long>(photoCount), static_cast<unsigned long>(measurementCount),
-        static_cast<unsigned long>(errorCount),
-        static_cast<unsigned long long>(freeSd / (1024 * 1024)), ESP.getFreeHeap());
+
+    StatusLine::Snapshot snapshot;
+    snapshot.epoch = static_cast<long>(nowUtc);
+    snapshot.firmwareVersion = FIRMWARE_VERSION;
+    snapshot.uptimeS = nowMs / 1000;
+    snapshot.counters = {readingsOkCount, readingsFailedCount, photosOkCount, photosFailedCount};
+    snapshot.sdFreeMb = sdReady ? SdStorage::freeSpaceBytes() / (1024 * 1024) : 0;
+    snapshot.freeHeap = ESP.getFreeHeap();
+    snapshot.freePsram = ESP.getFreePsram();
+    snapshot.lastError = lastErrorMsg;
+
+    char line[200];
+    StatusLine::formatLine(snapshot, line, sizeof(line));
+    Serial.println(line);
+
+    if (sdReady && !SdStorage::writeStatusLine(line)) {
+      Serial.println("Storage error: status line not written (see above)");
+      sdReady = false;  // Retried from the main loop above.
+    }
+
+    readingsOkCount = 0;
+    readingsFailedCount = 0;
+    photosOkCount = 0;
+    photosFailedCount = 0;
+    lastErrorMsg[0] = '\0';
   }
 }
