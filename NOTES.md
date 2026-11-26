@@ -135,6 +135,8 @@ Diagnoseladder bij uploadproblemen: zie poort (`pio device list` / `ls /dev/cu.*
 - `FIRMWARE_VERSION` naar `0.7.0`.
 - Analyse-tool (`tools/analyze/analyze_run.py`, draait op de laptop, niet op het board): zie het losse stuk in de PR-beschrijving/eindmelding; geen firmware-wijziging.
 
+**Correctie (26 november 2026):** de eerste versie van `analyze_run.py` (PR #8, al gemerged in `main`) was zonder de echte prototypes geschreven — die stonden niet in deze git-worktree, waardoor de stijgingsdetectie een zelf verzonnen heuristiek was (één uitsnede, sterkste rand). Na deze PR bleken `tools/analyze/prototype/{sheet,crops,chart,rise}.py` (de echte proef-1/proef-2-scripts) wél op de laptop te staan, alleen nog niet (ge)commit. Rechtgezet in een losse PR: de prototypes zijn nu toegevoegd aan de repo (`tools/analyze/prototype/`, as-is, zie CLAUDE.md), en `rise.py`/`analyze_run.py` zijn herschreven om hun aanpak te volgen — een (optioneel per regio instelbare) gladstrijk-stap vóór de randdetectie, en de keuze uit "sterkste rand" / "alleen oplopend" / "alleen aflopend" in plaats van altijd de grootste verandering. Ook generiek gemaakt tot meerdere benoemde regio's (`surface_regions` in de config) in plaats van de twee hardgecodeerde pixel-boxen ("front"/"back") uit het prototype, met een val-terug naar één regio ("surface") als er alleen een `crop` + `px_per_cm` is opgegeven. `px_per_cm=60.0` uit het prototype klopt met de eerder genoteerde ~60 px/cm-inzicht bij proef 2 hierboven.
+
 ## Proeven
 
 ### Proef 1: zuurdesemstarter, 1:2:2 (11–12 november 2026)

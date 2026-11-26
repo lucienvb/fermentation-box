@@ -28,6 +28,29 @@ def test_surface_row_requires_at_least_two_rows():
         surface_row(np.array([[1, 2, 3]], dtype=float))
 
 
+def test_surface_row_sign_rising_only_counts_dark_to_light():
+    # Two edges: a big drop (rows 4->5, light to dark) and a smaller rise
+    # (rows 8->9, dark to light). "abs" picks the bigger one regardless of
+    # direction; "rising"/"falling" must pick by direction only.
+    rows = [220] * 5 + [0] * 4 + [40] * 5
+    gray = np.array([[v, v] for v in rows], dtype=float)
+    assert surface_row(gray, sign="abs") == 4  # the bigger (light->dark) edge
+    assert surface_row(gray, sign="rising") == 8  # dark->light edge only
+    assert surface_row(gray, sign="falling") == 4
+
+
+def test_surface_row_smoothing_fixes_jitter_induced_off_by_one():
+    # Alternating +/-30 row jitter (averages out) plus a real, consistent
+    # +40 step starting at row 10. Unsmoothed, the jitter phase lines up
+    # right before the step and wins by a hair, misplacing the edge by
+    # one row; smoothing damps the jitter and finds the true step.
+    base = 100.0
+    rows = [base + (30 if i % 2 == 0 else -30) + (40 if i >= 10 else 0) for i in range(20)]
+    gray = np.array([[v, v] for v in rows], dtype=float)
+    assert surface_row(gray, smoothing=1) == 9
+    assert surface_row(gray, smoothing=3) == 10
+
+
 def test_rise_cm_series_empty_input():
     assert rise_cm_series([], px_per_cm=10) == []
 

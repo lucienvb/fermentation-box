@@ -11,8 +11,20 @@ Usage:
         --start "2026-11-12 09:35" --end "2026-11-12 22:20" --out out/proef-2 \\
         --config runs/proef-2.json
 
-Config file (optional, enables the crops/rise curve output):
-    {"crop": {"x": 120, "y": 80, "w": 300, "h": 200}, "px_per_cm": 60.0}
+Config file (optional, enables the crops/rise curve output). "crop" is the
+visual region shown in crops.jpg; "surface_regions" are one or more named
+sub-regions tracked for the rise curve (ported from the two hardcoded
+boxes - "front"/"back" edge of the dough - in tools/analyze/prototype/
+rise.py). If "surface_regions" is omitted but "crop" + "px_per_cm" are
+given, that single region is used as a fallback, named "surface":
+    {
+      "crop": {"x": 400, "y": 280, "w": 250, "h": 280},
+      "px_per_cm": 60.0,
+      "surface_regions": {
+        "back":  {"x": 420, "y": 300, "w": 40, "h": 180, "smoothing": 7, "sign": "abs"},
+        "front": {"x": 500, "y": 420, "w": 100, "h": 120, "smoothing": 5, "sign": "rising"}
+      }
+    }
 """
 
 from __future__ import annotations
@@ -56,14 +68,42 @@ class CropRegion:
     h: int
 
 
-def load_config(path: Path | None) -> tuple[CropRegion | None, float | None]:
+@dataclass
+class SurfaceRegion:
+    """One named sub-region tracked for the rise curve - see rise.py's
+    surface_row() for what `smoothing`/`sign` do. Ported from the two
+    hardcoded pixel boxes ("front"/"back") in tools/analyze/prototype/
+    rise.py."""
+
+    x: int
+    y: int
+    w: int
+    h: int
+    smoothing: int = 1
+    sign: str = "abs"
+
+
+def load_config(path: Path | None) -> tuple[CropRegion | None, float | None, dict[str, SurfaceRegion]]:
     if path is None:
-        return None, None
+        return None, None, {}
+
     data = json.loads(path.read_text())
     crop_data = data.get("crop")
     crop = CropRegion(**crop_data) if crop_data else None
     px_per_cm = data.get("px_per_cm")
-    return crop, px_per_cm
+
+    regions_data = data.get("surface_regions")
+    if regions_data:
+        regions = {name: SurfaceRegion(**fields) for name, fields in regions_data.items()}
+    elif crop_data and px_per_cm:
+        # No named regions given: fall back to tracking the single visual
+        # crop itself, so a minimal config (just crop + px_per_cm) still
+        # produces a rise curve.
+        regions = {"surface": SurfaceRegion(**crop_data)}
+    else:
+        regions = {}
+
+    return crop, px_per_cm, regions
 
 
 def build_climate_chart(measurements, out_path: Path) -> None:
@@ -170,21 +210,24 @@ def build_crops_overview(photos: list[tuple[int, Path]], crop: CropRegion, start
         _grid_sheet(tiles).save(out_path)
 
 
-def compute_rise_series(photos: list[tuple[int, Path]], crop: CropRegion, px_per_cm: float):
-    box = (crop.x, crop.y, crop.x + crop.w, crop.y + crop.h)
+def compute_rise_series(photos: list[tuple[int, Path]], region: SurfaceRegion, px_per_cm: float):
+    box = (region.x, region.y, region.x + region.w, region.y + region.h)
     rows = []
     for _epoch, path in photos:
         with Image.open(path) as img:
             gray = np.asarray(img.convert("L").crop(box), dtype=float)
-        rows.append(surface_row(gray))
+        rows.append(surface_row(gray, smoothing=region.smoothing, sign=region.sign))
     return rise_cm_series(rows, px_per_cm)
 
 
-def build_rise_chart(photos: list[tuple[int, Path]], rise_cm: list[float], out_path: Path) -> None:
+def build_rise_chart(photos: list[tuple[int, Path]], rise_by_region: dict[str, list[float]],
+                      out_path: Path) -> None:
     times = [to_local(epoch) for epoch, _path in photos]
     fig, ax = plt.subplots(figsize=(10, 3.5))
-    ax.plot(times, rise_cm, color="tab:green")
+    for name in sorted(rise_by_region):
+        ax.plot(times, rise_by_region[name], marker="o", markersize=3, label=name)
     ax.set_ylabel("Stijging (cm)")
+    ax.legend(frameon=False)
     ax.xaxis.set_major_formatter(mdates.DateFormatter("%d-%m %H:%M"))
     fig.autofmt_xdate()
     fig.tight_layout()
@@ -207,7 +250,8 @@ def detect_peak(photos: list[tuple[int, Path]], rise_cm: list[float]):
 
 
 def build_summary(run_label: str, start_epoch: int, end_epoch: int, measurements, boots,
-                   photos, rise_cm: list[float] | None, peak_time, out_path: Path) -> None:
+                   photos, rise_by_region: dict[str, list[float]], peak_by_region: dict,
+                   out_path: Path) -> None:
     temps = [m.temperature_c for m in measurements if m.temperature_c is not None]
     hums = [m.humidity_pct for m in measurements if m.humidity_pct is not None]
     failed = sum(1 for m in measurements if m.temperature_c is None)
@@ -238,11 +282,20 @@ def build_summary(run_label: str, start_epoch: int, end_epoch: int, measurements
         lines.append(
             f"- Vochtigheid: {min(hums):.1f}-{max(hums):.1f} % (gem. {statistics.mean(hums):.1f})"
         )
-    if rise_cm:
-        lines.append(f"- Eindstijging: {rise_cm[-1]:.2f} cm")
-        lines.append(f"- Piek: {peak_time:%d-%m %H:%M}" if peak_time else "- Piek: geen duidelijke piek (nog stijgend of vlak)")
+    if rise_by_region:
+        for name in sorted(rise_by_region):
+            series = rise_by_region[name]
+            if not series:
+                continue
+            peak = peak_by_region.get(name)
+            lines.append(f"- Eindstijging ({name}): {series[-1]:.2f} cm")
+            lines.append(
+                f"  - Piek: {peak:%d-%m %H:%M}" if peak else "  - Piek: geen duidelijke piek (nog stijgend of vlak)"
+            )
     else:
-        lines.append("- Stijgingscurve: niet berekend (geen config met crop/px_per_cm opgegeven)")
+        lines.append(
+            "- Stijgingscurve: niet berekend (geen config met crop/px_per_cm of surface_regions opgegeven)"
+        )
 
     out_path.write_text("\n".join(lines) + "\n")
 
@@ -282,17 +335,21 @@ def main() -> None:
     build_climate_chart(measurements, args.out / "chart.png")
     build_hourly_overview(photos, start_epoch, end_epoch, args.out / "overview.jpg")
 
-    crop, px_per_cm = load_config(args.config)
-    rise_cm = None
-    peak_time = None
-    if crop and px_per_cm:
+    crop, px_per_cm, regions = load_config(args.config)
+    if crop:
         build_crops_overview(photos, crop, start_epoch, end_epoch, args.out / "crops.jpg")
-        rise_cm = compute_rise_series(photos, crop, px_per_cm)
-        build_rise_chart(photos, rise_cm, args.out / "rise.png")
-        peak_time = detect_peak(photos, rise_cm)
 
-    build_summary(run_label, start_epoch, end_epoch, measurements, boots, photos, rise_cm, peak_time,
-                  args.out / "summary.md")
+    rise_by_region: dict[str, list[float]] = {}
+    peak_by_region: dict[str, object] = {}
+    if regions and px_per_cm:
+        for name, region in regions.items():
+            series = compute_rise_series(photos, region, px_per_cm)
+            rise_by_region[name] = series
+            peak_by_region[name] = detect_peak(photos, series)
+        build_rise_chart(photos, rise_by_region, args.out / "rise.png")
+
+    build_summary(run_label, start_epoch, end_epoch, measurements, boots, photos, rise_by_region,
+                  peak_by_region, args.out / "summary.md")
     print(f"Written to {args.out}")
 
 
