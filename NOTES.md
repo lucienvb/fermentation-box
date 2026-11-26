@@ -123,6 +123,18 @@ Diagnoseladder bij uploadproblemen: zie poort (`pio device list` / `ls /dev/cu.*
 - **Interrupt watchdog (zie "Proeven" hieronder, 09:41 na de upload van 0.5.0).** Eigen modules (`sensor.cpp`, `camera.cpp`, `sd_storage.cpp`, `web.cpp`, `wifi_time.cpp`, `ota.cpp`, `main.cpp`) doorzocht op `noInterrupts`/`portENTER_CRITICAL`/ISR's/lange blokkerende secties: niets gevonden. De enige `delay()`'s die er zijn (flitser-warmup 200 ms, sensor-warmup 2 s bij opstarten, nu ook de nieuwe 2,5 s DHT22-retry) draaien buiten een ISR en met interrupts aan; geen van alle is lang genoeg om de interrupt-watchdog (standaard enkele honderden ms) te raken. Meest aannemelijke verklaring: de interrupt-watchdog trad op vlak na een OTA-upload, dus waarschijnlijk tijdens het wegschrijven/wissen van de nieuwe firmware-partitie zelf (SPI-flash-erase/write schakelt de cache en daarmee interrupts op beide cores kort uit; in combinatie met wifi-timing is dit een bekend incidenteel ESP32/Arduino-verschijnsel bij grote OTA-writes, niet iets in onze eigen code). Niet verder uitgezocht binnen de tijdbox van 15 minuten voor dit punt; nog te doen als het vaker voorkomt — zie hieronder.
 - `FIRMWARE_VERSION` naar `0.6.0`.
 
+**Correctie (26 november 2026):** PR #6 (F2d) was per ongeluk gemerged in `lucienvb/f0-fermentation-box-firmware` in plaats van `main` — `main` stond daardoor nog op 0.5.0 terwijl het board al op 0.6.0 draaide. Rechtgezet met een losse PR #7 (zelfde commit, fast-forward naar `main`, geen inhoudelijke wijziging) vóór F2e is begonnen.
+
+## F2e: proeven markeren, analyse-tool (26 november 2026)
+
+- Nieuwe modules `run_log.h/.cpp` (pure CSV-escaping en regelopbouw, native getest vóór de implementatie) en `run_state.h/.cpp` (welke run nu loopt, pure state, ook native getest).
+- `/data/runs.csv`: `epoch,event(start|end),name,product,starter_g,flour_g,water_g,water_temp_c,note` — bij een `end`-regel blijven product/starter_g/flour_g/water_g/water_temp_c leeg (die zijn alleen relevant bij de start). Tekstvelden (name, product, note) worden RFC4180-achtig geëscaped (komma/dubbele quote/regeleinde → tussen dubbele quotes, dubbele quote verdubbeld) via `RunLog::escapeField()`.
+- **Welke run nu loopt wordt alleen in RAM bijgehouden** (`run_state.cpp`), niet op de SD-kaart. Bewuste vereenvoudiging binnen de tijdbox van F2e: bij een herstart tijdens een lopende run toont de opstelpagina die run niet meer als "lopend" (de start/end-regels in `runs.csv` blijven natuurlijk wel staan). Als dit hindert: alsnog uit `runs.csv` afleiden (laatste `start` zonder latere `end`) zou de volgende stap zijn.
+- Opstelpagina (`web.cpp`/`web_setup_page.cpp`): formulier "Start run" (naam, product, starter/bloem/water in g, watertemperatuur, vrije notitie) en knop "End run"; toont de lopende run en hoe lang die al loopt (`GET /api/run/current`, elke 10 s opgehaald). `POST /api/run/start` en `POST /api/run/end` loggen naar `runs.csv` en zetten/legen `RunState`.
+- Het meten en fotograferen (`main.cpp`) is niet aangepast: dat loopt altijd door, een run is puur een label erbovenop.
+- `FIRMWARE_VERSION` naar `0.7.0`.
+- Analyse-tool (`tools/analyze/analyze_run.py`, draait op de laptop, niet op het board): zie het losse stuk in de PR-beschrijving/eindmelding; geen firmware-wijziging.
+
 ## Proeven
 
 ### Proef 1: zuurdesemstarter, 1:2:2 (11–12 november 2026)
@@ -139,12 +151,26 @@ Diagnoseladder bij uploadproblemen: zie poort (`pio device list` / `ls /dev/cu.*
   - Zichtbaar kleurverschil tussen dag- en nachtfoto's (keukenlicht vs. alleen de flitser) — mogelijk relevant voor een latere "witbalans vast zetten"-stap (zie F2d hierboven).
   - Glimstrepen/reflecties van de flitser op de pot — hinderlijk bij het beoordelen van foto's, nog geen concrete fix.
 
+### Proef 2: zuurdesemstarter uit proef 1, 1:1:1 (12 november 2026)
+
+- **Opzet:** 20 g starter uit proef 1, voeding 1:1:1 (dus ~20 g bloem + ~20 g lauw water erbij), kleine clip-pot, deksel op een kier, camera dichterbij, keukenlucht (geen klimaatregeling). Firmware 0.5.0. Van 09:35 tot ~22:20.
+- **Techniek:** 51 van de 51 geplande kwartierfoto's, plus 1 inhaalfoto direct na de opstart (zie F2's "precies één foto na een herstart"-gedrag hierboven) — dus 52 foto's in totaal, geen gaten. Geen herstarts tijdens de proef. 768 metingen, geen gaten.
+- **Klimaat:** 18,1–19,5 °C (gemiddeld 18,8 °C), 43–57 % relatieve vochtigheid; twee keer koken (rond 12:45 en 18:30) en een deur of raam open rond 19:40 zijn terug te zien als kleine schommelingen.
+- **Resultaat:** langzame, gelijkmatige stijging: voorrand ~+0,25 cm, achterrand ~+0,6 cm, op een beginlaag van ~1,3 cm. Geen duidelijke piek. De starter wordt wakker (1:1:1 en lauw water helpen duidelijk t.o.v. proef 1's 1:2:2), maar blijft traag.
+- **Inzicht:** de stijging is automatisch uit de foto's te meten (zie "Analyse-tool" hieronder) — ruwweg 60 pixels/cm in deze opstelling (camera-afstand van proef 2).
+- **Verbeterpunten voor de volgende proef:**
+  - Starter eerst apart actief maken (een paar voedingen vóór de proef) in plaats van direct met starter uit de koelkast/vorige proef te beginnen.
+  - Minstens 3 cm starthoogte, zodat een kleine stijging relatief beter zichtbaar is.
+  - Camera op hoogte van het deegoppervlak zetten, niet van bovenaf.
+  - Een warmere plek dan de keuken (zie proef 1: sourdough rijst traag onder 20 °C).
+
 ## Nog te doen
 
 - Op hardware testen: eerste USB-upload, wifi-verbinding, NTP-sync, DHT22-meting, watchdog, OTA-upload naar 0.1.1 (stappen staan in de PR-beschrijving/eindmelding van F0).
 - ~~Op hardware testen: F1-spike (SD + camera + DHT22 tegelijk, OTA naar 0.2.0).~~ Gelukt op 9–10 november, zie hierboven. Nog door te geven: bytegrootte van één foto en capture/save-tijd in ms uit de serial-log.
 - ~~Op hardware testen: F2 (fotoschema, bewaarbeleid, bootlog, OTA naar 0.3.0) — één nacht doordraaien.~~ ~~Op hardware testen: F2b (opstelpagina, OTA naar 0.4.0).~~ ~~Op hardware testen: F2c (gedimde flitser, OTA naar 0.5.0).~~ Alle drie gelukt tijdens proef 1 (zie "Proeven" hierboven): volledige nacht gedraaid op 0.5.0, 93/93 foto's met flits, 1309 metingen.
 - Op hardware testen: F2d (OTA naar 0.6.0) — DHT22 loskoppelen tijdens een meting (retry + lege-waarden-regel `epoch,,` moet verschijnen in de dag-CSV), een uur laten draaien en `/data/status.csv` controleren (één regel per uur, tellers kloppen met de serial-log), elke witbalans-/belichtings-/gain-combinatie als testfoto proberen (headers tonen de juiste waarden, "Use for schedule" + herstart moet blijven staan), een nacht draaien en kijken of de interrupt watchdog van proef 1 zich herhaalt.
+- Op hardware testen: F2e (OTA naar 0.7.0) — een run starten en weer eindigen via de opstelpagina, `/data/runs.csv` controleren (start- en end-regel, velden kloppen, een notitie met een komma/quote erin komt netjes geëscaped terug), de lopende run + looptijd checken terwijl de pagina openstaat, en een herstart tijdens een lopende run (bekende beperking: de pagina toont hem dan niet meer als lopend, zie F2e hierboven) om te bevestigen dat meten/fotograferen daar niet door wordt geraakt.
 - **Interrupt watchdog (proef 1, 09:41, kort na de OTA-upload van 0.5.0):** geen oorzaak in onze eigen code gevonden binnen de tijdbox van F2d (zie F2d hierboven). Als dit bij een volgende OTA-upload terugkomt: eerst checken of het weer net na een upload is (wijst op de flash-erase/write zelf, niet op de lopende firmware) vóór er verder in de eigen modules gezocht wordt.
 - **Als de SD-kaart uitvalt, gaan metingen en foto's verloren** (geen terugval naar LittleFS). Bewust, voorlopig: LittleFS heeft met OTA maar ~1,4 MiB ruimte (zie projectdocument §7, punt 2), genoeg voor metingen maar niet voor foto's; een aparte terugvalopslag is meer ontwerpwerk dan deze fase toelaat.
 - F3: lokale webpagina (basis uit de thuismeter, `web.cpp`).

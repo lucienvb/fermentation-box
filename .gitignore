@@ -1,3 +1,7 @@
 .pio/
 include/secrets.h
 .DS_Store
+tools/analyze/.venv/
+tools/analyze/__pycache__/
+tools/analyze/tests/__pycache__/
+tools/analyze/.pytest_cache/
