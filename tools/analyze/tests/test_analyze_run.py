@@ -92,6 +92,50 @@ def test_analyze_run_end_to_end_by_run_name(tmp_path):
     assert "Herstarts" in summary
 
 
+def test_analyze_run_with_named_surface_regions(tmp_path):
+    sdcard = tmp_path / "sdcard"
+    sdcard.mkdir()
+    _build_fake_dataset(sdcard)
+
+    config = tmp_path / "proef-test.json"
+    config.write_text(
+        json.dumps(
+            {
+                "crop": {"x": 0, "y": 0, "w": 100, "h": 100},
+                "px_per_cm": 10.0,
+                "surface_regions": {
+                    "back": {"x": 0, "y": 0, "w": 50, "h": 100, "smoothing": 3, "sign": "abs"},
+                    "front": {"x": 50, "y": 0, "w": 50, "h": 100, "smoothing": 1, "sign": "falling"},
+                },
+            }
+        )
+    )
+
+    out_dir = tmp_path / "out"
+    result = subprocess.run(
+        [
+            sys.executable,
+            str(ANALYZE_SCRIPT),
+            "--sdcard",
+            str(sdcard),
+            "--run",
+            "proef-test",
+            "--config",
+            str(config),
+            "--out",
+            str(out_dir),
+        ],
+        capture_output=True,
+        text=True,
+    )
+    assert result.returncode == 0, result.stderr
+    assert (out_dir / "rise.png").is_file()
+
+    summary = (out_dir / "summary.md").read_text()
+    assert "Eindstijging (back)" in summary
+    assert "Eindstijging (front)" in summary
+
+
 def test_analyze_run_without_config_skips_rise_curve(tmp_path):
     sdcard = tmp_path / "sdcard"
     sdcard.mkdir()
