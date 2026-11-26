@@ -52,6 +52,10 @@ bool writeBootRecord(time_t bootEpochUtc, const char* firmwareVersion, const cha
 // logs on any error.
 bool writeStatusLine(const char* line);
 
+// Appends one pre-formatted run event line (run_log.h, F2e) plus a newline
+// to /data/runs.csv. Returns false and logs on any error.
+bool writeRunLine(const char* line);
+
 // Current free space on the mounted card. Only valid when the card is
 // mounted (begin() returned ok); callers must check that themselves.
 uint64_t freeSpaceBytes();

@@ -29,6 +29,7 @@ bool flashPinInitialized = false;
 constexpr const char* kPhotosDir = "/photos";
 constexpr const char* kBootsCsvPath = "/data/boots.csv";
 constexpr const char* kStatusCsvPath = "/data/status.csv";
+constexpr const char* kRunsCsvPath = "/data/runs.csv";
 
 // Sums file sizes directly inside a day photo directory (flat, no
 // subdirectories expected).
@@ -263,6 +264,31 @@ bool writeStatusLine(const char* line) {
   if (len < 0 || written != static_cast<size_t>(len)) {
     Serial.print("SD error: status line not fully written to ");
     Serial.println(kStatusCsvPath);
+    return false;
+  }
+  return true;
+}
+
+bool writeRunLine(const char* line) {
+  if (!line) {
+    return false;
+  }
+
+  File f = SD_MMC.open(kRunsCsvPath, FILE_APPEND);
+  if (!f) {
+    Serial.print("SD error: could not open ");
+    Serial.println(kRunsCsvPath);
+    return false;
+  }
+
+  char buf[320];
+  int len = snprintf(buf, sizeof(buf), "%s\n", line);
+  size_t written = f.print(buf);
+  f.close();
+
+  if (len < 0 || written != static_cast<size_t>(len)) {
+    Serial.print("SD error: run line not fully written to ");
+    Serial.println(kRunsCsvPath);
     return false;
   }
   return true;

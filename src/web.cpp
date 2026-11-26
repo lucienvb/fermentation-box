@@ -14,6 +14,8 @@
 #include "flash_settings.h"
 #include "paths.h"
 #include "photo_schedule.h"
+#include "run_log.h"
+#include "run_state.h"
 #include "sd_storage.h"
 #include "secrets.h"
 #include "web_setup_page.h"
@@ -210,6 +212,111 @@ void handleApiCameraSettingsPost() {
   server.send(200, "application/json", "{\"ok\":true}");
 }
 
+// Escapes '"' and '\' so a user-supplied run name can be embedded in a JSON
+// string literal; truncates rather than overflowing bufSize.
+void appendJsonEscaped(const char* in, char* buf, size_t bufSize) {
+  size_t pos = 0;
+  for (const char* p = in; *p && pos + 2 < bufSize; ++p) {
+    if (*p == '"' || *p == '\\') {
+      buf[pos++] = '\\';
+    }
+    buf[pos++] = *p;
+  }
+  buf[pos] = '\0';
+}
+
+// "Start run": logs a run/start line to /data/runs.csv (run_log.h) and
+// starts tracking it in RunState (RAM only, see run_state.h) so the setup
+// page can show it as the ongoing run. Does not touch the measurement/
+// photo schedule, which keeps running regardless (see CLAUDE.md).
+void handleApiRunStart() {
+  if (!checkAuth()) {
+    return;
+  }
+
+  String name = server.arg("name");
+  if (name.length() == 0) {
+    server.send(400, "text/plain", "Missing name");
+    return;
+  }
+  String product = server.arg("product");
+  String note = server.arg("note");
+
+  time_t nowUtc = WifiTime::nowUtc();
+  RunLog::StartFields fields;
+  fields.epoch = nowUtc;
+  fields.name = name.c_str();
+  fields.product = product.c_str();
+  fields.starterG = server.arg("starter_g").toFloat();
+  fields.flourG = server.arg("flour_g").toFloat();
+  fields.waterG = server.arg("water_g").toFloat();
+  fields.waterTempC = server.arg("water_temp_c").toFloat();
+  fields.note = note.c_str();
+
+  char line[320];
+  if (!RunLog::formatStartLine(fields, line, sizeof(line))) {
+    server.send(500, "text/plain", "Run line too long to log.");
+    return;
+  }
+  if (!SdStorage::writeRunLine(line)) {
+    server.send(500, "text/plain", "Could not write to runs.csv (see serial log).");
+    return;
+  }
+
+  RunState::start(name.c_str(), nowUtc);
+  server.send(200, "application/json", "{\"ok\":true}");
+}
+
+// "End run": logs a run/end line for the currently tracked run and clears
+// RunState.
+void handleApiRunEnd() {
+  if (!checkAuth()) {
+    return;
+  }
+
+  RunState::Current current = RunState::current();
+  if (!current.active) {
+    server.send(409, "text/plain", "No run is active.");
+    return;
+  }
+
+  time_t nowUtc = WifiTime::nowUtc();
+  String note = server.arg("note");
+
+  char line[320];
+  if (!RunLog::formatEndLine(nowUtc, current.name, note.c_str(), line, sizeof(line))) {
+    server.send(500, "text/plain", "Run line too long to log.");
+    return;
+  }
+  if (!SdStorage::writeRunLine(line)) {
+    server.send(500, "text/plain", "Could not write to runs.csv (see serial log).");
+    return;
+  }
+
+  RunState::end();
+  server.send(200, "application/json", "{\"ok\":true}");
+}
+
+// Current run and how long it has been running (RunState, RAM only), so
+// the setup page can show it without re-reading the SD card.
+void handleApiRunCurrent() {
+  if (!checkAuth()) {
+    return;
+  }
+
+  RunState::Current current = RunState::current();
+  char json[96];
+  if (current.active) {
+    char nameEscaped[64];
+    appendJsonEscaped(current.name, nameEscaped, sizeof(nameEscaped));
+    snprintf(json, sizeof(json), "{\"active\":true,\"name\":\"%s\",\"elapsedS\":%lu}",
+             nameEscaped, RunState::elapsedSeconds(WifiTime::nowUtc()));
+  } else {
+    snprintf(json, sizeof(json), "{\"active\":false}");
+  }
+  server.send(200, "application/json", json);
+}
+
 }  // namespace
 
 namespace Web {
@@ -222,6 +329,9 @@ void begin() {
   server.on("/api/flash/brightness", HTTP_POST, handleApiFlashBrightnessPost);
   server.on("/api/camera/settings", HTTP_GET, handleApiCameraSettingsGet);
   server.on("/api/camera/settings", HTTP_POST, handleApiCameraSettingsPost);
+  server.on("/api/run/start", HTTP_POST, handleApiRunStart);
+  server.on("/api/run/end", HTTP_POST, handleApiRunEnd);
+  server.on("/api/run/current", HTTP_GET, handleApiRunCurrent);
   server.begin();
   Serial.println("Web: setup page ready (http://fermentatiebox.local)");
 }

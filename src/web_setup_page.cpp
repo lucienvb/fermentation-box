@@ -22,6 +22,11 @@ const char kSetupPageHtml[] PROGMEM = R"HTML(<!DOCTYPE html>
     width: 4.5rem; background: #222; color: #eee; border: 1px solid #444;
     border-radius: 4px; padding: 0.4rem;
   }
+  input[type=text] {
+    background: #222; color: #eee; border: 1px solid #444;
+    border-radius: 4px; padding: 0.4rem;
+  }
+  h2 { font-size: 1.05rem; margin: 1.2rem 0 0.4rem; }
   .status { color: #999; font-size: 0.9rem; margin-bottom: 0.6rem; min-height: 1.2em; }
   .photo-wrap { position: relative; display: inline-block; max-width: 100%; }
   #photo { max-width: 100%; display: none; border-radius: 4px; cursor: zoom-in; }
@@ -83,6 +88,21 @@ const char kSetupPageHtml[] PROGMEM = R"HTML(<!DOCTYPE html>
   <button id="use-camera-settings-btn">Use for schedule</button>
   <span class="status" id="camera-settings-status"></span>
 </div>
+<h2>Run</h2>
+<div class="controls">
+  <input type="text" id="run-name" placeholder="name, e.g. proef-3" size="12">
+  <input type="text" id="run-product" placeholder="product" size="10">
+  <input type="number" id="run-starter-g" placeholder="starter g" step="0.1" style="width:5.5rem;">
+  <input type="number" id="run-flour-g" placeholder="flour g" step="0.1" style="width:5.5rem;">
+  <input type="number" id="run-water-g" placeholder="water g" step="0.1" style="width:5.5rem;">
+  <input type="number" id="run-water-temp-c" placeholder="water temp C" step="0.1" style="width:6.5rem;">
+</div>
+<div class="controls">
+  <input type="text" id="run-note" placeholder="note" style="flex: 1 1 12rem;">
+  <button id="run-start-btn">Start run</button>
+  <button id="run-end-btn" disabled>End run</button>
+  <span class="status" id="run-status"></span>
+</div>
 <div class="status" id="status"></div>
 <div class="photo-wrap">
   <img id="photo" alt="test photo">
@@ -113,6 +133,16 @@ const char kSetupPageHtml[] PROGMEM = R"HTML(<!DOCTYPE html>
   var agcValue = document.getElementById('agc-value');
   var useCameraSettingsBtn = document.getElementById('use-camera-settings-btn');
   var cameraSettingsStatusEl = document.getElementById('camera-settings-status');
+  var runNameInput = document.getElementById('run-name');
+  var runProductInput = document.getElementById('run-product');
+  var runStarterInput = document.getElementById('run-starter-g');
+  var runFlourInput = document.getElementById('run-flour-g');
+  var runWaterInput = document.getElementById('run-water-g');
+  var runWaterTempInput = document.getElementById('run-water-temp-c');
+  var runNoteInput = document.getElementById('run-note');
+  var runStartBtn = document.getElementById('run-start-btn');
+  var runEndBtn = document.getElementById('run-end-btn');
+  var runStatusEl = document.getElementById('run-status');
   var liveTimer = null;
   var hasPhoto = false;
 
@@ -282,6 +312,75 @@ const char kSetupPageHtml[] PROGMEM = R"HTML(<!DOCTYPE html>
       statusEl.textContent = 'Error: ' + e.message;
     }).finally(function () {
       referenceBtn.disabled = false;
+    });
+  });
+  function formatElapsed(totalSeconds) {
+    var h = Math.floor(totalSeconds / 3600);
+    var m = Math.floor((totalSeconds % 3600) / 60);
+    return h + 'h ' + m + 'm';
+  }
+
+  function refreshRunStatus() {
+    fetch('/api/run/current').then(function (r) {
+      return r.ok ? r.json() : null;
+    }).then(function (d) {
+      if (!d) return;
+      if (d.active) {
+        runStatusEl.textContent = 'Running: ' + d.name + ' (' + formatElapsed(d.elapsedS) + ')';
+        runStartBtn.disabled = true;
+        runEndBtn.disabled = false;
+      } else {
+        runStatusEl.textContent = 'No run active';
+        runStartBtn.disabled = false;
+        runEndBtn.disabled = true;
+      }
+    }).catch(function () {});
+  }
+  refreshRunStatus();
+  setInterval(refreshRunStatus, 10000);
+
+  runStartBtn.addEventListener('click', function () {
+    if (!runNameInput.value) {
+      runStatusEl.textContent = 'Name is required';
+      return;
+    }
+    runStartBtn.disabled = true;
+    runStatusEl.textContent = 'Starting...';
+    var params = 'name=' + encodeURIComponent(runNameInput.value) +
+      '&product=' + encodeURIComponent(runProductInput.value) +
+      '&starter_g=' + encodeURIComponent(runStarterInput.value || '0') +
+      '&flour_g=' + encodeURIComponent(runFlourInput.value || '0') +
+      '&water_g=' + encodeURIComponent(runWaterInput.value || '0') +
+      '&water_temp_c=' + encodeURIComponent(runWaterTempInput.value || '0') +
+      '&note=' + encodeURIComponent(runNoteInput.value);
+    fetch('/api/run/start?' + params, { method: 'POST' }).then(function (r) {
+      if (!r.ok) {
+        return r.text().then(function (t) { throw new Error(t || ('error ' + r.status)); });
+      }
+      return r.json();
+    }).then(function () {
+      refreshRunStatus();
+    }).catch(function (e) {
+      runStatusEl.textContent = 'Error: ' + e.message;
+    }).finally(function () {
+      runStartBtn.disabled = false;
+    });
+  });
+
+  runEndBtn.addEventListener('click', function () {
+    runEndBtn.disabled = true;
+    runStatusEl.textContent = 'Ending...';
+    fetch('/api/run/end?note=' + encodeURIComponent(runNoteInput.value), { method: 'POST' }).then(function (r) {
+      if (!r.ok) {
+        return r.text().then(function (t) { throw new Error(t || ('error ' + r.status)); });
+      }
+      return r.json();
+    }).then(function () {
+      refreshRunStatus();
+    }).catch(function (e) {
+      runStatusEl.textContent = 'Error: ' + e.message;
+    }).finally(function () {
+      runEndBtn.disabled = false;
     });
   });
 })();
