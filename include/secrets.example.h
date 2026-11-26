@@ -8,3 +8,7 @@
 
 // Password for ArduinoOTA (wireless firmware updates), see NOTES.md.
 #define OTA_PASSWORD "your-ota-password"
+
+// HTTP Basic Auth for the setup page / camera endpoints (see NOTES.md).
+#define CAMERA_USER "your-camera-username"
+#define CAMERA_PASSWORD "your-camera-password"
