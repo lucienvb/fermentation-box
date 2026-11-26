@@ -9,6 +9,7 @@
 
 #include "camera.h"
 #include "camera_gate.h"
+#include "camera_settings.h"
 #include "flash_duty.h"
 #include "flash_settings.h"
 #include "paths.h"
@@ -100,8 +101,13 @@ void handleApiPhoto() {
     return;
   }
 
+  CameraSettings::Settings settings = Camera::currentSettings();
   server.sendHeader("Cache-Control", "no-store");
   server.sendHeader("X-Flash-Brightness-Percent", String(brightnessPercent));
+  server.sendHeader("X-White-Balance", CameraSettings::toString(settings.whiteBalance));
+  server.sendHeader("X-Exposure",
+                     settings.exposureAuto ? "auto" : String(settings.exposureValue));
+  server.sendHeader("X-Gain", settings.gainAuto ? "auto" : String(settings.gainValue));
   server.setContentLength(gLastPhotoLen);
   server.send(200, "image/jpeg", "");
   server.sendContent(reinterpret_cast<const char*>(gLastPhotoBuffer), gLastPhotoLen);
@@ -160,6 +166,50 @@ void handleApiFlashBrightnessPost() {
   server.send(200, "application/json", json);
 }
 
+// Current white balance/exposure/gain (Camera::currentSettings()), so the
+// setup page can show/preselect them.
+void handleApiCameraSettingsGet() {
+  if (!checkAuth()) {
+    return;
+  }
+  CameraSettings::Settings settings = Camera::currentSettings();
+  char json[160];
+  snprintf(json, sizeof(json),
+           "{\"whiteBalance\":%d,\"exposureAuto\":%s,\"exposureValue\":%d,\"gainAuto\":%s,"
+           "\"gainValue\":%d}",
+           static_cast<int>(settings.whiteBalance), settings.exposureAuto ? "true" : "false",
+           settings.exposureValue, settings.gainAuto ? "true" : "false", settings.gainValue);
+  server.send(200, "application/json", json);
+}
+
+// "Use for schedule": persists white balance/exposure/gain (NVS, survives a
+// restart) and applies them immediately.
+void handleApiCameraSettingsPost() {
+  if (!checkAuth()) {
+    return;
+  }
+
+  CameraSettings::Settings settings = CameraSettings::kDefault;
+  if (server.hasArg("whiteBalance")) {
+    int wb = server.arg("whiteBalance").toInt();
+    settings.whiteBalance = (wb >= 0 && wb <= 4) ? static_cast<CameraSettings::WhiteBalance>(wb)
+                                                  : CameraSettings::WhiteBalance::kAuto;
+  }
+  settings.exposureAuto = server.arg("exposureAuto") != "false";
+  if (!settings.exposureAuto) {
+    settings.exposureValue = constrain(server.arg("exposureValue").toInt(), 0, 1200);
+  }
+  settings.gainAuto = server.arg("gainAuto") != "false";
+  if (!settings.gainAuto) {
+    settings.gainValue = constrain(server.arg("gainValue").toInt(), 0, 30);
+  }
+
+  CameraSettings::save(settings);
+  Camera::applySettings(settings);
+
+  server.send(200, "application/json", "{\"ok\":true}");
+}
+
 }  // namespace
 
 namespace Web {
@@ -170,6 +220,8 @@ void begin() {
   server.on("/api/photo/reference", HTTP_POST, handleApiPhotoReference);
   server.on("/api/flash/brightness", HTTP_GET, handleApiFlashBrightnessGet);
   server.on("/api/flash/brightness", HTTP_POST, handleApiFlashBrightnessPost);
+  server.on("/api/camera/settings", HTTP_GET, handleApiCameraSettingsGet);
+  server.on("/api/camera/settings", HTTP_POST, handleApiCameraSettingsPost);
   server.begin();
   Serial.println("Web: setup page ready (http://fermentatiebox.local)");
 }

@@ -27,6 +27,7 @@ constexpr unsigned long kFlashWarmupMs = 200;
 
 bool cameraReady = false;
 int gFlashBrightnessPercent = FlashSettings::kDefaultBrightnessPercent;
+CameraSettings::Settings gSettings = CameraSettings::kDefault;
 
 void flashOff() {
   ledcWrite(kFlashLedChannel, 0);
@@ -163,6 +164,35 @@ void setFlashBrightnessPercent(int percent) {
 
 int flashBrightnessPercent() {
   return gFlashBrightnessPercent;
+}
+
+void applySettings(const CameraSettings::Settings& settings) {
+  gSettings = settings;
+  if (!cameraReady) {
+    return;
+  }
+
+  sensor_t* s = esp_camera_sensor_get();
+  if (!s) {
+    return;
+  }
+
+  s->set_whitebal(s, 1);
+  s->set_wb_mode(s, static_cast<int>(settings.whiteBalance));
+
+  s->set_exposure_ctrl(s, settings.exposureAuto ? 1 : 0);
+  if (!settings.exposureAuto) {
+    s->set_aec_value(s, settings.exposureValue);
+  }
+
+  s->set_gain_ctrl(s, settings.gainAuto ? 1 : 0);
+  if (!settings.gainAuto) {
+    s->set_agc_gain(s, settings.gainValue);
+  }
+}
+
+CameraSettings::Settings currentSettings() {
+  return gSettings;
 }
 
 }  // namespace Camera

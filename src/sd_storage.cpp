@@ -28,6 +28,7 @@ bool flashPinInitialized = false;
 
 constexpr const char* kPhotosDir = "/photos";
 constexpr const char* kBootsCsvPath = "/data/boots.csv";
+constexpr const char* kStatusCsvPath = "/data/status.csv";
 
 // Sums file sizes directly inside a day photo directory (flat, no
 // subdirectories expected).
@@ -113,7 +114,7 @@ BeginInfo begin() {
 }
 
 bool writeMeasurement(const SensorReading& reading, time_t measuredAtUtc) {
-  if (!reading.ok || measuredAtUtc <= 0) {
+  if (measuredAtUtc <= 0) {
     return false;
   }
 
@@ -128,8 +129,16 @@ bool writeMeasurement(const SensorReading& reading, time_t measuredAtUtc) {
   }
 
   char line[48];
-  int len = snprintf(line, sizeof(line), "%ld,%.1f,%.1f\n", static_cast<long>(measuredAtUtc),
-                      reading.temperatureC, reading.humidityPercent);
+  int len;
+  if (reading.ok) {
+    len = snprintf(line, sizeof(line), "%ld,%.1f,%.1f\n", static_cast<long>(measuredAtUtc),
+                    reading.temperatureC, reading.humidityPercent);
+  } else {
+    // Empty temperature/humidity fields: a gap in the data is then
+    // explainable as a failed reading rather than a missing minute (F2d,
+    // see NOTES.md).
+    len = snprintf(line, sizeof(line), "%ld,,\n", static_cast<long>(measuredAtUtc));
+  }
   size_t written = f.print(line);
   f.close();
 
@@ -229,6 +238,31 @@ bool writeBootRecord(time_t bootEpochUtc, const char* firmwareVersion, const cha
   if (len < 0 || written != static_cast<size_t>(len)) {
     Serial.print("SD error: boot record not fully written to ");
     Serial.println(kBootsCsvPath);
+    return false;
+  }
+  return true;
+}
+
+bool writeStatusLine(const char* line) {
+  if (!line) {
+    return false;
+  }
+
+  File f = SD_MMC.open(kStatusCsvPath, FILE_APPEND);
+  if (!f) {
+    Serial.print("SD error: could not open ");
+    Serial.println(kStatusCsvPath);
+    return false;
+  }
+
+  char buf[220];
+  int len = snprintf(buf, sizeof(buf), "%s\n", line);
+  size_t written = f.print(buf);
+  f.close();
+
+  if (len < 0 || written != static_cast<size_t>(len)) {
+    Serial.print("SD error: status line not fully written to ");
+    Serial.println(kStatusCsvPath);
     return false;
   }
   return true;

@@ -18,6 +18,10 @@ const char kSetupPageHtml[] PROGMEM = R"HTML(<!DOCTYPE html>
   }
   button:disabled { opacity: 0.5; cursor: default; }
   label { display: flex; align-items: center; gap: 0.35rem; cursor: pointer; font-size: 0.95rem; }
+  input[type=number] {
+    width: 4.5rem; background: #222; color: #eee; border: 1px solid #444;
+    border-radius: 4px; padding: 0.4rem;
+  }
   .status { color: #999; font-size: 0.9rem; margin-bottom: 0.6rem; min-height: 1.2em; }
   .photo-wrap { position: relative; display: inline-block; max-width: 100%; }
   #photo { max-width: 100%; display: none; border-radius: 4px; cursor: zoom-in; }
@@ -52,6 +56,33 @@ const char kSetupPageHtml[] PROGMEM = R"HTML(<!DOCTYPE html>
   <button id="use-for-schedule-btn">Use for schedule</button>
   <span class="status" id="schedule-status"></span>
 </div>
+<div class="controls">
+  <label>White balance
+    <select id="wb-select">
+      <option value="0">Auto</option>
+      <option value="1">Sunny</option>
+      <option value="2">Cloudy</option>
+      <option value="3">Office</option>
+      <option value="4">Home</option>
+    </select>
+  </label>
+  <label>Exposure
+    <select id="aec-select">
+      <option value="auto">Auto</option>
+      <option value="manual">Manual</option>
+    </select>
+  </label>
+  <input type="number" id="aec-value" min="0" max="1200" step="10" value="300">
+  <label>Gain
+    <select id="agc-select">
+      <option value="auto">Auto</option>
+      <option value="manual">Manual</option>
+    </select>
+  </label>
+  <input type="number" id="agc-value" min="0" max="30" value="0">
+  <button id="use-camera-settings-btn">Use for schedule</button>
+  <span class="status" id="camera-settings-status"></span>
+</div>
 <div class="status" id="status"></div>
 <div class="photo-wrap">
   <img id="photo" alt="test photo">
@@ -75,6 +106,13 @@ const char kSetupPageHtml[] PROGMEM = R"HTML(<!DOCTYPE html>
   var brightnessSelect = document.getElementById('brightness-select');
   var useForScheduleBtn = document.getElementById('use-for-schedule-btn');
   var scheduleStatusEl = document.getElementById('schedule-status');
+  var wbSelect = document.getElementById('wb-select');
+  var aecSelect = document.getElementById('aec-select');
+  var aecValue = document.getElementById('aec-value');
+  var agcSelect = document.getElementById('agc-select');
+  var agcValue = document.getElementById('agc-value');
+  var useCameraSettingsBtn = document.getElementById('use-camera-settings-btn');
+  var cameraSettingsStatusEl = document.getElementById('camera-settings-status');
   var liveTimer = null;
   var hasPhoto = false;
 
@@ -85,6 +123,26 @@ const char kSetupPageHtml[] PROGMEM = R"HTML(<!DOCTYPE html>
       brightnessSelect.value = String(d.percent);
     }
   }).catch(function () {});
+
+  function updateExposureGainVisibility() {
+    aecValue.style.display = aecSelect.value === 'manual' ? 'inline-block' : 'none';
+    agcValue.style.display = agcSelect.value === 'manual' ? 'inline-block' : 'none';
+  }
+
+  fetch('/api/camera/settings').then(function (r) {
+    return r.ok ? r.json() : null;
+  }).then(function (d) {
+    if (!d) return;
+    wbSelect.value = String(d.whiteBalance);
+    aecSelect.value = d.exposureAuto ? 'auto' : 'manual';
+    aecValue.value = String(d.exposureValue);
+    agcSelect.value = d.gainAuto ? 'auto' : 'manual';
+    agcValue.value = String(d.gainValue);
+    updateExposureGainVisibility();
+  }).catch(function () {});
+  updateExposureGainVisibility();
+  aecSelect.addEventListener('change', updateExposureGainVisibility);
+  agcSelect.addEventListener('change', updateExposureGainVisibility);
 
   function drawGrid() {
     if (!gridToggle.checked || photo.clientWidth === 0) {
@@ -122,15 +180,22 @@ const char kSetupPageHtml[] PROGMEM = R"HTML(<!DOCTYPE html>
         });
       }
       brightnessUsed = r.headers.get('X-Flash-Brightness-Percent') || brightnessUsed;
-      return r.blob();
-    }).then(function (blob) {
+      var wbUsed = r.headers.get('X-White-Balance') || '?';
+      var aecUsed = r.headers.get('X-Exposure') || '?';
+      var agcUsed = r.headers.get('X-Gain') || '?';
+      return r.blob().then(function (blob) {
+        return { blob: blob, wbUsed: wbUsed, aecUsed: aecUsed, agcUsed: agcUsed };
+      });
+    }).then(function (result) {
+      var blob = result.blob;
       photo.onload = drawGrid;
       photo.src = URL.createObjectURL(blob);
       photo.style.display = 'block';
       hasPhoto = true;
       referenceBtn.disabled = false;
       metaEl.textContent = 'Taken at ' + new Date().toLocaleTimeString() +
-        ' - ' + (blob.size / 1024).toFixed(1) + ' KB - flash ' + brightnessUsed + '%';
+        ' - ' + (blob.size / 1024).toFixed(1) + ' KB - flash ' + brightnessUsed + '%' +
+        ' - wb ' + result.wbUsed + ' - exposure ' + result.aecUsed + ' - gain ' + result.agcUsed;
       statusEl.textContent = '';
     }).catch(function (e) {
       statusEl.textContent = 'Error: ' + e.message;
@@ -178,6 +243,28 @@ const char kSetupPageHtml[] PROGMEM = R"HTML(<!DOCTYPE html>
       scheduleStatusEl.textContent = 'Error: ' + e.message;
     }).finally(function () {
       useForScheduleBtn.disabled = false;
+    });
+  });
+
+  useCameraSettingsBtn.addEventListener('click', function () {
+    useCameraSettingsBtn.disabled = true;
+    cameraSettingsStatusEl.textContent = 'Saving...';
+    var params = 'whiteBalance=' + encodeURIComponent(wbSelect.value) +
+      '&exposureAuto=' + (aecSelect.value === 'auto') +
+      '&exposureValue=' + encodeURIComponent(aecValue.value) +
+      '&gainAuto=' + (agcSelect.value === 'auto') +
+      '&gainValue=' + encodeURIComponent(agcValue.value);
+    fetch('/api/camera/settings?' + params, { method: 'POST' }).then(function (r) {
+      if (!r.ok) {
+        return r.text().then(function (t) { throw new Error(t || ('error ' + r.status)); });
+      }
+      return r.json();
+    }).then(function () {
+      cameraSettingsStatusEl.textContent = 'Schedule updated';
+    }).catch(function (e) {
+      cameraSettingsStatusEl.textContent = 'Error: ' + e.message;
+    }).finally(function () {
+      useCameraSettingsBtn.disabled = false;
     });
   });
 
