@@ -26,3 +26,18 @@ jobs:
 
       - name: Run native unittest (retention policy)
         run: pio test -e native
+
+  analyze-tool:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+
+      - name: Install analyze_run.py dependencies
+        run: pip install -r tools/analyze/requirements.txt pytest==8.2.2
+
+      - name: Run analyze_run.py tests
+        run: pytest tools/analyze/tests

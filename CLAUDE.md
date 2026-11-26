@@ -44,7 +44,8 @@ home-monitor project.
 ## Structure and commands
 
 ### Stack
-- PlatformIO Core (CLI), environments `esp32cam` (USB), `esp32cam_ota` (OTA, extends `esp32cam`), `native` (pure-logic tests only: retention policy, SD card paths, photo schedule, test-photo gate, flash brightness math, status line formatting).
+- PlatformIO Core (CLI), environments `esp32cam` (USB), `esp32cam_ota` (OTA, extends `esp32cam`), `native` (pure-logic tests only: retention policy, SD card paths, photo schedule, test-photo gate, flash brightness math, status line formatting, run log CSV escaping/line building and run tracking).
+- `tools/analyze/`: a separate Python CLI tool (laptop only, not part of the firmware) that turns a copy of the SD card into charts/photo overviews/a rise curve for one run. See its own section below.
 - Framework: Arduino. Platform: `espressif32@6.9.0` (pinned in platformio.ini).
 - Libraries: `adafruit/DHT sensor library@1.4.7`, `adafruit/Adafruit Unified Sensor@1.1.15`. No other libraries.
 - mDNS / OTA hostname: `fermentatiebox`.
@@ -64,17 +65,27 @@ home-monitor project.
 - `sd_storage.h/.cpp` — SD card start in 1-bit mode, CSV append (with an empty-value line on a failed reading, F2d) and photo save using `paths.h`; boot record append (`/data/boots.csv`); hourly status line append (`/data/status.csv`, F2d); retention enforcement on `/photos` day directories using `retention.h`.
 - `retention.h/.cpp` — pure function deciding which day directories to delete under low free space (never today's, never `/data` CSV files). Wired into `sd_storage.cpp` from F2 onward. Native tested.
 - `camera_gate.h/.cpp` — pure function deciding whether a test photo (setup page) may be taken now: the fixed photo schedule always wins (busy, or due within 5 s), then a 3-second rate limit between test photos. Native tested.
-- `web.h/.cpp` — synchronous `WebServer` (F2b): setup page (`/`) and camera endpoints (`GET /api/photo`, `POST /api/photo/reference`), plus flash brightness endpoints (`GET`/`POST /api/flash/brightness`, F2c) and white balance/exposure/gain endpoints (`GET`/`POST /api/camera/settings`, F2d), Basic Auth from `include/secrets.h` (`CAMERA_USER`/`CAMERA_PASSWORD`). Page HTML/JS lives in `web_setup_page.h/.cpp` so this file stays small. Basis for the F3 local page.
+- `run_log.h/.cpp` — pure CSV field escaping (RFC 4180-ish: comma/quote/newline) and run/start and run/end line building for `/data/runs.csv` (F2e). Native tested.
+- `run_state.h/.cpp` — which run is currently active and since when, RAM only (not persisted - see NOTES.md, F2e). Native tested.
+- `web.h/.cpp` — synchronous `WebServer` (F2b): setup page (`/`) and camera endpoints (`GET /api/photo`, `POST /api/photo/reference`), plus flash brightness endpoints (`GET`/`POST /api/flash/brightness`, F2c), white balance/exposure/gain endpoints (`GET`/`POST /api/camera/settings`, F2d) and run endpoints (`POST /api/run/start`, `POST /api/run/end`, `GET /api/run/current`, F2e), Basic Auth from `include/secrets.h` (`CAMERA_USER`/`CAMERA_PASSWORD`). Page HTML/JS lives in `web_setup_page.h/.cpp` so this file stays small. Basis for the F3 local page.
 - `version.h` — `FIRMWARE_VERSION`, bumped on every firmware PR.
-- `main.cpp` — stays short: setup/loop calling the modules. F2 scope: 1-minute measurement interval, 15-minute photo schedule (`photo_schedule.h`), hourly retention check and status line, SD remount retry every 5 minutes, boot record once time is synced. F2b adds the setup web page (`web.h`). F2c loads the saved flash brightness (`flash_settings.h`) into `camera.h` at boot. F2d loads the saved white balance/exposure/gain (`camera_settings.h`) into `camera.h` at boot, and replaces the since-boot status counters with since-last-status-line counters (`status_line.h`).
+- `main.cpp` — stays short: setup/loop calling the modules. F2 scope: 1-minute measurement interval, 15-minute photo schedule (`photo_schedule.h`), hourly retention check and status line, SD remount retry every 5 minutes, boot record once time is synced. F2b adds the setup web page (`web.h`). F2c loads the saved flash brightness (`flash_settings.h`) into `camera.h` at boot. F2d loads the saved white balance/exposure/gain (`camera_settings.h`) into `camera.h` at boot, and replaces the since-boot status counters with since-last-status-line counters (`status_line.h`). F2e does not touch `main.cpp`: run tracking is handled entirely in `web.cpp`/`run_state.h`, alongside the unchanged measurement/photo loop.
+
+### Analysis tool (tools/analyze/, F2e)
+- `analyze_run.py` — CLI entry point: `python3 tools/analyze/analyze_run.py --sdcard <dir> --run <name> --out <dir>` (or `--start`/`--end` instead of `--run`), optional `--config <file>` (JSON: `crop` region + `px_per_cm`) to also produce jar crops and a rise curve. Produces `chart.png` (temperature/humidity, local time, gaps and failed readings visible), `overview.jpg` (one photo per hour), and with a config also `crops.jpg` and `rise.png`, plus `summary.md`.
+- `sdcard_data.py` — pure-ish parsing of `/data/*.csv`, `/data/boots.csv`, `/data/runs.csv` and `/photos/YYYY-MM-DD/HHMMSS.jpg` from a copy of the SD card, and local-time (Europe/Amsterdam) conversion. Pytest-tested with a small fake dataset in `tmp_path`.
+- `rise.py` — pure surface-row detection (strongest horizontal edge in a grayscale crop) and the rise-in-cm time series (median filter against single-frame outliers). No file I/O; pytest-tested with synthetic arrays.
+- `requirements.txt` — pinned (Pillow, numpy, scipy, matplotlib). Install with `pip install -r tools/analyze/requirements.txt`.
+- `tests/` — pytest, including an end-to-end smoke test (`test_analyze_run.py`) against a generated fake dataset.
 
 ### Commands
 - Build (`esp32cam`, the default): `pio run`
 - Upload via USB: `pio run -t upload` (manual procedure, see NOTES.md — I run this myself)
 - Upload via wifi (OTA): `OTA_PASSWORD=... pio run -e esp32cam_ota -t upload` (I run this myself)
-- Native unittests of the retention policy, SD card paths, photo schedule, test-photo gate and status line formatting (no hardware needed): `pio test -e native`
+- Native unittests of the retention policy, SD card paths, photo schedule, test-photo gate, status line formatting and run log/state (no hardware needed): `pio test -e native`
 - Connected boards: `pio device list`
 - Serial monitor (always with a time limit): `pio device monitor`
+- Analysis tool tests (laptop, no hardware): `pip install -r tools/analyze/requirements.txt pytest && pytest tools/analyze/tests`
 
 ### CI
-GitHub Actions (`.github/workflows/build.yml`), on push to `main` and on `pull_request`: PlatformIO 6.2.0, copy `secrets.example.h` to `secrets.h`, `pio run`, `pio test -e native`.
+GitHub Actions (`.github/workflows/build.yml`), on push to `main` and on `pull_request`: a `build` job (PlatformIO 6.2.0, copy `secrets.example.h` to `secrets.h`, `pio run`, `pio test -e native`) and a separate `analyze-tool` job (installs `tools/analyze/requirements.txt` + pytest, runs `pytest tools/analyze/tests`).
